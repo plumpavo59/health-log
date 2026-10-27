@@ -97,6 +97,7 @@ input[type=range].unset::-moz-range-thumb{background:#fff;border:2px solid var(-
 <script>
 'use strict';
 const UNDO_MS = 5000;
+const APP_VERSION = 'v3 · 27 Oct';
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('hl.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem('hl.' + k, JSON.stringify(v)); } catch (e) {} }
@@ -234,7 +235,8 @@ function render() {
     (rows.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + rows.map((r) =>
       '<div class="row"><span class="t">' + esc(r.hm) + '</span><span>' + esc(r.text) + '</span>' +
       (r.status === 'pending' ? '<button type="button" class="link-btn" data-act="undo" data-v="' + esc(r.id) + '">Undo</button>' :
-        '<span class="st' + (r.status === 'failed' ? ' bad' : '') + '">' + (r.status === 'saved' ? 'Saved' : r.status === 'failed' ? 'Not saved' : 'Waiting') + '</span>') + '</div>').join('') + '</section>' : '');
+        '<span class="st' + (r.status === 'failed' ? ' bad' : '') + '">' + (r.status === 'saved' ? 'Saved' : r.status === 'failed' ? 'Not saved' : 'Waiting') + '</span>') + '</div>').join('') + '</section>' : '') +
+    '<p class="small" style="text-align:center;margin:8px 0 0">Health log ' + APP_VERSION + '</p>';
   updateCheckButton();
 }
 
@@ -250,12 +252,12 @@ function updateCheckButton() {
 
 function setupView() {
   return '<header><div><div class="eyebrow">LIFE HQ</div><h1>Health log</h1></div></header>' +
-    '<form class="setup" id="setup-form"><p>One-off setup. Paste the receiver address and key from the Life HQ Siri Inbox script. They stay on this phone only.</p>' +
+    '<form class="setup" id="setup-form"><p>One-off setup. Paste the receiver address and key from the <b>Ru - Inbox Receiver</b> script (they’re also in your Siri shortcut’s “Get Contents of URL” step). They stay on this phone only.</p>' +
     '<label for="ep">Receiver address (ends /exec)</label><input id="ep" type="url" inputmode="url" autocomplete="off" value="' + esc(LS.get('endpoint', '')) + '" placeholder="https://script.google.com/macros/s/…/exec">' +
     '<label for="ky">Key</label><input id="ky" type="password" autocomplete="off" value="' + esc(LS.get('key', '')) + '">' +
     '<button type="submit" class="log wide">Save and test</button>' +
     (LS.get('endpoint', '') ? '<button type="button" class="seg" data-act="setup-cancel">Back</button>' : '') +
-    '<p class="small">Health records are written straight to your Google health tracker. Nothing is stored on this website.</p></form>';
+    '<p class="small">Health records are written straight to your Google health tracker. Nothing is stored on this website.</p><p class="small">Health log ' + APP_VERSION + '</p></form>';
 }
 
 /* ---------- toast ---------- */
@@ -446,7 +448,18 @@ setInterval(() => { if (!document.hidden) { if (!S.timeOpen && !S.open && docume
 
 render();
 if (!S.setup) { flush(); refreshConfig(); }
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  let reloaded = false;
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    if (!Object.keys(pending).length) location.reload();
+  });
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+  }).catch(() => {});
+}
 </script>
 </body>
 </html>
