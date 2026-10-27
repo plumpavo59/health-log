@@ -288,3 +288,10 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
 .tv #recent-section{border-top:0;padding-top:44px}
 .tomorrow-ready{display:inline-block;margin-top:8px;padding:8px 14px;min-height:38px;border:1px solid var(--line);border-radius:19px;background:transparent;color:var(--text2);font-size:.9rem}
 #tabbar button{max-width:160px;font-size:12px}
+
+/* v8: roomier Health log, taken marks */
+#log-main{display:flex;flex-direction:column;gap:20px}
+.lv .card{padding:13px 14px 14px}
+.taken{font-size:13px;font-weight:600;margin-left:2px;opacity:.75}
+.chip[aria-pressed=true] .taken{opacity:.9}
+.lv .chip{padding:0 12px;gap:5px}

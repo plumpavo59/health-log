@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v7 · 27 Oct';
+const APP_VERSION = 'v8 · 27 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -435,9 +435,9 @@ function logRender() {
     trialView() + checkinView() +
     '<section class="card" aria-label="Medication"><div class="card-head"><h2>Medication</h2><button type="button" class="log" data-act="meds"' + (medsChosen ? '' : ' disabled') + '>' + (medsChosen ? 'Log ' + medsChosen : 'Log') + '</button></div>' +
       '<div class="chips">' + (cfg.meds || []).map((m) =>
-        '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '">' + dueDot(m) + '<b>' + esc(m.name) + '</b>' + chipDose(m) + '</button>').join('') +
+        '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + chipDose(m) + takenMark(m) + '</button>').join('') +
         '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' +
-      ((cfg.meds || []).some((m) => dueDot(m)) ? '<div class="due-key"><span class="due" aria-hidden="true"></span> not logged yet today</div>' : '') +
+
       doseRows() + historyView() + '</section>' + bowelView() +
     '<section class="card" aria-label="Food"><h2>Food</h2>' +
       '<div class="inline-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
@@ -452,15 +452,16 @@ function logRender() {
   updateCheckButton();
 }
 
-/* Quiet marker on routine medicines not yet logged this health day (as-needed ones = several doses). */
-function dueDot(m) {
-  if (medOptions(m).length > 1) return '';
+/* Logged today (this health day, 4am cut-off): ✓ when done, "1/2" part-way for twice-daily medicines. */
+function takenMark(m) {
   const hk = healthKey(new Date());
   let n = ((cfg.today || {}).meds || {})[m.name] || 0;
   n += recent.filter((r) => r.kind === 'meds' && r.hday === hk && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)).length;
+  if (!n) return '';
   const per = m.perDay || 1;
-  if (n >= per) return '';
-  return '<span class="due' + (n > 0 ? ' part' : '') + '" role="img" aria-label="' + (n > 0 ? n + ' of ' + per + ' logged today' : 'not logged yet today') + '"></span>';
+  const asNeeded = medOptions(m).length > 1;
+  const text = !asNeeded && n < per ? n + '/' + per : n > 1 && asNeeded ? '✓' + n : '✓';
+  return '<span class="taken" aria-label="' + (n < per && !asNeeded ? n + ' of ' + per + ' logged today' : 'logged today' + (n > 1 ? ', ' + n + ' times' : '')) + '">' + text + '</span>';
 }
 
 function chipDose(m) {
