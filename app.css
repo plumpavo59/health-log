@@ -305,3 +305,12 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
 .tv .forecast-title{margin-top:30px!important}
 .dose-row{justify-content:center;gap:6px 6px}
 .dose-row span{flex-basis:100%;min-width:0;text-align:center;font-size:13px;font-weight:600;color:var(--muted)}
+
+/* v10: Optional on Ahead, Today buttons */
+.tv .ahead-row.ahead-task{grid-template-columns:25px 84px minmax(0,1fr) auto}
+.tv .ahead-row.ahead-no-time{grid-template-columns:25px minmax(0,1fr) auto}
+.move-today{font-size:.8rem;padding:4px 10px;min-height:32px;border:1px solid var(--line2);border-radius:16px;background:transparent;color:var(--muted);align-self:start}
+.move-today:disabled{opacity:.6}
+.optional-week{margin-top:34px;padding-top:6px;border-top:1px solid var(--line3)}
+.tv .optional-title{text-align:center;font-size:1rem;font-weight:600;margin:16px 0 4px}
+.optional-week h4{font-size:.76rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted2);font-weight:500;margin:16px 0 7px}

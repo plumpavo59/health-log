@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v9 · 27 Oct';
+const APP_VERSION = 'v10 · 27 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -1109,7 +1109,55 @@ function pageEnter(name, title, panelId, after, load, stampKey) {
   $(panelId).hidden = !paired;
   if (paired && (!T[stampKey] || Date.now() - T[stampKey] > 120000)) { T[stampKey] = Date.now(); load(); }
 }
-function aheadEnter() { pageEnter('ahead', 'Ahead', 'next-days', '', loadNextFewDays, 'aheadAt'); }
+function aheadEnter() { pageEnter('ahead', 'Ahead', 'next-days', '<section id="optional-week" class="optional-week" aria-live="polite"></section>', loadAhead, 'aheadAt'); }
+function loadAhead() { loadNextFewDays(); loadOptionalWeek(); }
+
+/* "Today" button: moves a Todoist task to today (recurring tasks are refused by the server). */
+function todayButton(id, title) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'move-today'; b.textContent = 'Today';
+  b.setAttribute('aria-label', 'Move ' + title + ' to today');
+  b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Moving…';
+    try {
+      await dash('moveTaskToToday', [id]);
+      toast('Moved to today ✓');
+      LS.del('cache.day'); T.lastLoad = 0;
+      loadAhead();
+    } catch (e) {
+      b.disabled = false; b.textContent = 'Today';
+      toast(/not a function/i.test(e.message) ? 'Needs the Optional-tasks file in the Life Dashboard script.' : e.message);
+    }
+  };
+  return b;
+}
+
+function loadOptionalWeek() {
+  const panel = $('optional-week');
+  if (!panel) return;
+  panelLoad('getOptionalTasks', 'optional-week', (result) => {
+    panel.replaceChildren();
+    const h = document.createElement('h3'); h.className = 'optional-title'; h.textContent = 'Optional'; panel.appendChild(h);
+    const tasks = (result && result.tasks) || [];
+    if (!tasks.length) { const p = document.createElement('p'); p.className = 'muted'; p.style.textAlign = 'center'; p.textContent = 'Nothing optional this week.'; panel.appendChild(p); return; }
+    let last = null;
+    tasks.forEach((t) => {
+      const label = t.date ? t.label : 'Any time';
+      if (label !== last) { const h4 = document.createElement('h4'); h4.textContent = label; panel.appendChild(h4); last = label; }
+      const row = document.createElement('div'); row.className = 'ahead-row ahead-task ahead-no-time';
+      const check = document.createElement('input'); check.type = 'checkbox'; check.setAttribute('aria-label', 'Complete ' + t.title);
+      check.disabled = T.completing.has(t.id); check.checked = T.completing.has(t.id);
+      check.onchange = () => { if (check.checked) completeTodoist(t.id, check, null, loadOptionalWeek); };
+      const content = document.createElement('div');
+      const a = document.createElement('a'); a.href = t.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = t.title; content.appendChild(a);
+      const bits = [t.time, t.duration ? t.duration + ' min' : '', t.recurring ? 'repeats' : ''].filter(Boolean);
+      if (bits.length) { const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = bits.join(' · '); content.appendChild(sub); }
+      row.append(check, content);
+      if (!t.recurring) row.appendChild(todayButton(t.id, t.title));
+      panel.appendChild(row);
+    });
+  }, 'Loading optional tasks…');
+}
 function moneyEnter() { pageEnter('money', 'Money', 'money-panel', fileLinks([['Finances sheet', LINKS.moneySheet], ['Finances GPT', LINKS.moneyGpt]]), loadMoney, 'moneyAt'); }
 
 function loadNextFewDays() {
@@ -1147,6 +1195,7 @@ function loadNextFewDays() {
           }
           if (calendar || item.time) row.append(time, content);
           else { row.classList.add('ahead-no-time'); row.appendChild(content); }
+          if (!calendar) row.appendChild(todayButton(item.id || decodeURIComponent(String(item.url || '').split('/').pop()), item.title));
           block.appendChild(row);
         });
       };
