@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v8 · 27 Oct';
+const APP_VERSION = 'v9 · 27 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -280,7 +280,16 @@ const S = {
 };
 
 /* Medicines with several doses ("15 mg / 30 mg"): the first is preselected. */
-const medOptions = (m) => (Array.isArray(m.options) && m.options.length ? m.options : String(m.strength || '').split(/\s*\/\s*/)).filter(Boolean);
+/* Strengths are separated by " / " with spaces, so "15/500 mg / 30/500 mg" gives two. */
+const medOptions = (m) => (Array.isArray(m.options) && m.options.length ? m.options : String(m.strength || '').split(/\s+\/\s+/)).filter(Boolean);
+const maxTabs = (m) => Number(m.maxTabs) || 0;
+const isDosed = (m) => medOptions(m).length > 1 || maxTabs(m) > 0;
+/* Chosen dose as stored in Events: "2 × 15/500 mg" (tablet count) or "30 mg" (strength choice). */
+function doseText(m) {
+  const d = S.doses[m.name] || {};
+  const strength = d.s || medOptions(m)[0] || m.strength;
+  return maxTabs(m) ? (d.n || maxTabs(m)) + ' × ' + strength : strength;
+}
 function doseShort(opts) {
   const plain = opts.map((o) => o.match(/^(\d+(?:\.\d+)?)\s*([a-zµ]+)$/i));
   if (plain.every((x) => x && x[2] === plain[0][2])) return plain.map((x) => x[1]).join(' / ') + ' ' + plain[0][2];
@@ -292,11 +301,8 @@ function doseShort(opts) {
   return opts.join(' / ');
 }
 function doseMg(dose) {
-  const s = String(dose || '');
-  let m = s.match(/(\d+(?:\.\d+)?)\s*[×x*]\s*(\d+(?:\.\d+)?)\s*mg/i);
-  if (m) return Number(m[1]) * Number(m[2]);
-  m = s.match(/(\d+(?:\.\d+)?)\s*mg/i);
-  return m ? Number(m[1]) : null;
+  const m = String(dose || '').match(/(?:(\d+)\s*[×x*]\s*)?(\d+(?:\.\d+)?)(?:\s*\/\s*\d+(?:\.\d+)?)*\s*mg/i);
+  return m ? (m[1] ? Number(m[1]) : 1) * Number(m[2]) : null;
 }
 
 function trialView() {
@@ -459,21 +465,31 @@ function takenMark(m) {
   n += recent.filter((r) => r.kind === 'meds' && r.hday === hk && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)).length;
   if (!n) return '';
   const per = m.perDay || 1;
-  const asNeeded = medOptions(m).length > 1;
+  const asNeeded = isDosed(m);
   const text = !asNeeded && n < per ? n + '/' + per : n > 1 && asNeeded ? '✓' + n : '✓';
   return '<span class="taken" aria-label="' + (n < per && !asNeeded ? n + ' of ' + per + ' logged today' : 'logged today' + (n > 1 ? ', ' + n + ' times' : '')) + '">' + text + '</span>';
 }
 
+/* Compact chips: the strength only appears once a medicine is selected. */
 function chipDose(m) {
-  const opts = medOptions(m);
-  if (opts.length < 2) return m.strength ? '<small>' + esc(m.strength) + '</small>' : '';
-  return '<small>' + esc(S.meds.includes(m.name) && S.doses[m.name] ? S.doses[m.name] : doseShort(opts)) + '</small>';
+  if (!S.meds.includes(m.name)) return '';
+  const text = isDosed(m) ? doseText(m) : m.strength;
+  return text ? '<small>' + esc(text) + '</small>' : '';
 }
 
 function doseRows() {
-  const rows = (cfg.meds || []).filter((m) => S.meds.includes(m.name) && medOptions(m).length > 1);
-  return rows.map((m) => '<div class="dose-row" role="group" aria-label="' + esc(m.name) + ' dose"><span>' + esc(m.name) + '</span>' +
-    medOptions(m).map((o) => '<button type="button" class="seg" data-act="dose" data-v="' + esc(m.name) + '" data-dose="' + esc(o) + '" aria-pressed="' + (S.doses[m.name] === o) + '">' + esc(o) + '</button>').join('') + '</div>').join('');
+  const rows = (cfg.meds || []).filter((m) => S.meds.includes(m.name) && isDosed(m));
+  return rows.map((m) => {
+    const d = S.doses[m.name] || {};
+    const opts = medOptions(m);
+    const strength = d.s || opts[0];
+    const count = d.n || maxTabs(m);
+    const seg = (key, value, label, on) => '<button type="button" class="seg" data-act="dose" data-v="' + esc(m.name) + '" data-k="' + key + '" data-dose="' + esc(value) + '" aria-pressed="' + on + '">' + esc(label) + '</button>';
+    return '<div class="dose-row" role="group" aria-label="' + esc(m.name) + ' dose"><span>' + esc(m.name) + '</span>' +
+      (opts.length > 1 ? opts.map((o) => seg('s', o, o.replace(/\s*mg$/i, ''), o === strength)).join('') : '') +
+      (maxTabs(m) ? (opts.length > 1 ? '<i class="dose-gap"></i>' : '') + Array.from({ length: maxTabs(m) }, (_, i) => seg('n', String(i + 1), (opts.length > 1 ? '× ' + (i + 1) : (i + 1) + ' × ' + strength), count === i + 1)).join('') : '') +
+      '</div>';
+  }).join('');
 }
 
 function bowelView() {
@@ -598,12 +614,15 @@ function logAct(el) {
     else {
       S.meds = S.meds.concat(v);
       const m = (cfg.meds || []).find((x) => x.name === v);
-      const opts = m ? medOptions(m) : [];
-      if (opts.length > 1) S.doses[v] = opts[0];
+      if (m && isDosed(m)) S.doses[v] = { s: medOptions(m)[0], n: maxTabs(m) };
     }
     logRender();
   }
-  else if (act === 'dose') { S.doses[v] = el.dataset.dose; logRender(); }
+  else if (act === 'dose') {
+    const d = S.doses[v] || {};
+    if (el.dataset.k === 'n') d.n = Number(el.dataset.dose); else d.s = el.dataset.dose;
+    S.doses[v] = d; logRender();
+  }
   else if (act === 'cal') { S.calMed = S.calMed === v ? null : v; logRender(); }
   else if (act === 'other-med') { toast('Other medication: use the Siri inbox for now'); }
   else if (act === 'food-chip') { const f = S.food.trim().replace(/,$/, ''); S.food = f ? f + ', ' + v.toLowerCase() : v; logRender(); }
@@ -629,10 +648,10 @@ function logAct(el) {
     if (!S.meds.length) return;
     const chosen = (cfg.meds || []).filter((m) => S.meds.includes(m.name));
     // Dose choices need the v5 HealthLog script (it sends "options"); older ones would record the wrong dose.
-    const stale = chosen.find((m) => medOptions(m).length > 1 && !Array.isArray(m.options));
+    const stale = chosen.find((m) => (isDosed(m) || /paracetamol|co-?codamol|codeine/i.test(m.name)) && !('maxTabs' in m));
     if (stale) { toast(stale.name + ' needs the updated HealthLog script before it can be logged.'); return; }
     const doses = {};
-    chosen.forEach((m) => { if (medOptions(m).length > 1) doses[m.name] = S.doses[m.name] || medOptions(m)[0]; });
+    chosen.forEach((m) => { if (isDosed(m)) doses[m.name] = doseText(m); });
     const label = chosen.map((m) => m.name + (doses[m.name] ? ' ' + doses[m.name] : m.strength ? ' ' + m.strength : '')).join(', ');
     commit('meds', { meds: chosen.map((m) => m.name), doses }, label, { meds: chosen.map((m) => m.name), doses });
     S.meds = []; S.doses = {}; logRender();
@@ -1149,7 +1168,26 @@ function loadMoney() {
   const panel = $('money-panel');
   panelLoad('getFinanceDashboard', 'money-panel', (result) => {
     panel.replaceChildren();
-    const title = document.createElement('h3'); title.textContent = 'Cash forecast'; panel.appendChild(title);
+    const budgetBlock = (heading, metrics, error) => {
+      const block = document.createElement('section'); block.className = 'money-budget';
+      const h = document.createElement('h3'); h.textContent = heading; block.appendChild(h);
+      if (error || !metrics || !metrics.spent) {
+        const n = document.createElement('p'); n.className = 'budget-result'; n.textContent = error || 'Budget figures unavailable.'; block.appendChild(n);
+      } else {
+        const grid = document.createElement('div'); grid.className = 'budget-metrics';
+        [['Spent this month', metrics.spent], ['Budget remaining', metrics.remaining], ['Pace', metrics.paceText]].forEach(([label, value]) => {
+          const item = document.createElement('div');
+          const caption = document.createElement('div'); caption.className = 'budget-metric-label'; caption.textContent = label;
+          const text = document.createElement('p'); text.className = 'budget-result'; text.textContent = value;
+          item.append(caption, text); grid.appendChild(item);
+        });
+        block.appendChild(grid);
+      }
+      panel.appendChild(block);
+    };
+    budgetBlock('Personal budget', result.budget, result.budgetError);
+    budgetBlock('Equipment budget', result.equipment, result.equipmentError);
+    const title = document.createElement('h3'); title.className = 'forecast-title'; title.textContent = 'Cash forecast'; panel.appendChild(title);
     if (result.forecastError) { const n = document.createElement('p'); n.textContent = result.forecastError; panel.appendChild(n); }
     else {
       const table = document.createElement('table'); table.className = 'money-table';
@@ -1174,25 +1212,6 @@ function loadMoney() {
       table.appendChild(body);
       const wrap = document.createElement('div'); wrap.className = 'money-table-wrap'; wrap.appendChild(table); panel.appendChild(wrap);
     }
-    const budgetBlock = (heading, metrics, error) => {
-      const block = document.createElement('section'); block.className = 'money-budget';
-      const h = document.createElement('h3'); h.textContent = heading; block.appendChild(h);
-      if (error || !metrics || !metrics.spent) {
-        const n = document.createElement('p'); n.className = 'budget-result'; n.textContent = error || 'Budget figures unavailable.'; block.appendChild(n);
-      } else {
-        const grid = document.createElement('div'); grid.className = 'budget-metrics';
-        [['Spent this month', metrics.spent], ['Budget remaining', metrics.remaining], ['Pace', metrics.paceText]].forEach(([label, value]) => {
-          const item = document.createElement('div');
-          const caption = document.createElement('div'); caption.className = 'budget-metric-label'; caption.textContent = label;
-          const text = document.createElement('p'); text.className = 'budget-result'; text.textContent = value;
-          item.append(caption, text); grid.appendChild(item);
-        });
-        block.appendChild(grid);
-      }
-      panel.appendChild(block);
-    };
-    budgetBlock('Personal budget', result.budget, result.budgetError);
-    budgetBlock('Equipment budget', result.equipment, result.equipmentError);
     const foot = document.createElement('div'); foot.className = 'money-footnotes';
     if (Number.isInteger(result.unreviewedThisMonth)) {
       const review = document.createElement('p'), link = document.createElement('a');

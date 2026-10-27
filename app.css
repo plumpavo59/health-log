@@ -295,3 +295,13 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
 .taken{font-size:13px;font-weight:600;margin-left:2px;opacity:.75}
 .chip[aria-pressed=true] .taken{opacity:.9}
 .lv .chip{padding:0 12px;gap:5px}
+
+/* v9: compact meds, tablet counts, money order */
+.lv .chip{min-height:40px;font-size:15px}
+.lv .chips{gap:7px}
+.dose-gap{width:6px}
+.tv .money-budget:first-child{margin-top:4px}
+.tv .money-budget{margin-top:10px;margin-bottom:22px}
+.tv .forecast-title{margin-top:30px!important}
+.dose-row{justify-content:center;gap:6px 6px}
+.dose-row span{flex-basis:100%;min-width:0;text-align:center;font-size:13px;font-weight:600;color:var(--muted)}
