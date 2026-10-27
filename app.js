@@ -2,12 +2,22 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v6 · 27 Oct';
+const APP_VERSION = 'v7 · 27 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
 const UNDO_MS = 5000;
 const GPT_URL = 'https://chatgpt.com/g/g-p-6abfbfcab4cc8191bff95054e150f72c/project';
+const LINKS = {
+  hqSheet: 'https://docs.google.com/spreadsheets/d/1apxgN6nt1-eRLEs4FPoLxlz_jCRTNHENTv1BKb0A3Ss/edit',
+  healthGpt: 'https://chatgpt.com/g/g-p-6aa91f74be24819194dbc4a27bbefa83/project',
+  healthSheet: 'https://docs.google.com/spreadsheets/d/1QkafN7IUI48_fNUCXt7eW6dty-is6qXV-SKTliwmRLY/edit',
+  moneyGpt: 'https://chatgpt.com/g/g-p-6acf8514eb3c8191911f0206654c6568/project',
+  moneySheet: 'https://docs.google.com/spreadsheets/d/1BTDWxXeNIoe106swS5elL95POGdvddpM-4BMJGzoLko/edit',
+  works: 'https://docs.google.com/spreadsheets/d/1y5eEXAtQMUYAlrEbTkOHcwdi0AqoSR7V6O9CbTYBBB4/edit',
+  inventory: 'https://docs.google.com/spreadsheets/d/1Ol5M26V3L-Bt-d_MIPrL6o6es7f2o28l28lhtaRUsgU/edit'
+};
+const fileLinks = (pairs) => '<p class="file-links">' + pairs.map(([label, url]) => '<a href="' + url + '" target="_blank" rel="noopener">' + label + '</a>').join('<span aria-hidden="true"> · </span>') + '</p>';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -93,11 +103,13 @@ let view = null, lastMainView = START;
 function showView(v) {
   view = v;
   if (v !== 'settings') lastMainView = v;
-  ['today', 'log', 'settings'].forEach((name) => { $(name + '-view').hidden = name !== v; });
+  ['today', 'ahead', 'money', 'log', 'settings'].forEach((name) => { $(name + '-view').hidden = name !== v; });
   $('tabbar').hidden = v === 'settings';
   document.querySelectorAll('#tabbar [data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === v ? 'page' : 'false'));
   if (v === 'today') todayEnter();
-  else if (v === 'log') logRender();
+  else if (v === 'ahead') aheadEnter();
+  else if (v === 'money') moneyEnter();
+  else if (v === 'log') { logRender(); logMoreRender(); }
   else settingsRender();
 }
 document.querySelectorAll('#tabbar [data-tab]').forEach((b) => b.addEventListener('click', () => {
@@ -142,8 +154,9 @@ function settingsRender() {
       '<div class="row2" style="margin-top:10px"><button type="button" class="seg" data-act="pair-open">' + (Conn.paired() ? 'Pair again' : 'Pair this icon') + '</button>' +
       (Conn.paired() ? '<button type="button" class="seg" data-act="unpair">' + (unpairArmed ? 'Tap again to unpair' : 'Unpair') + '</button>' : '') + '</div></div>' +
     (Conn.paired() ? '<h2>PAIRED DEVICES</h2>' + devicesMarkup() : '') +
-    '<h2>ABOUT</h2><p class="small">Life HQ app ' + esc(APP_VERSION) + '. Each Home Screen icon is paired on its own. Today shows saved copies instantly, then refreshes. Health records go straight to your health tracker.</p>' +
-    '<div class="row2"><button type="button" class="seg" data-act="update">Check for update</button></div>';
+    '<h2>OTHER FILES</h2>' + fileLinks([['Works &amp; Royalties', LINKS.works], ['Inventory', LINKS.inventory], ['Life HQ sheet', LINKS.hqSheet]]) +
+    '<h2>ABOUT</h2><p class="small">Life HQ app ' + esc(APP_VERSION) + '. Each Home Screen icon is paired on its own. Pages show saved copies instantly, then refresh. Health records go straight to your health tracker.</p>' +
+    '<div class="row2"><button type="button" class="seg" data-act="update">Check for update</button><button type="button" class="seg" id="test-celebration" data-act="celebrate">Test celebration</button></div>';
   if (Conn.paired() && devices === null && !devicesError) loadDevices();
 }
 
@@ -220,6 +233,7 @@ async function settingsAct(el) {
     try { const res = await api({ action: 'revoke', id: v }); if (!res || !res.success) throw new Error(); devices = devices.filter((d) => d.id !== v); toast('Unpaired'); }
     catch (e) { toast('Couldn’t unpair that device'); }
     settingsRender();
+  } else if (act === 'celebrate') { await prepareCompletionAudio(); celebrateCompletion();
   } else if (act === 'update') {
     toast('Checking…');
     try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch (e) {}
@@ -375,7 +389,7 @@ function checkinView() {
   const last = cfg.today.lastCheckin ? 'Last: ' + cfg.today.lastCheckin.toLowerCase() : 'None yet today';
   let html = '<section class="card" aria-label="Check-in">' +
     '<button type="button" class="check-toggle" data-act="toggle" aria-expanded="' + S.open + '" aria-controls="check-body">' +
-    '<span><h2>Check-in</h2><span class="sub">' + (S.open ? 'Leave anything blank you didn’t notice' : esc(last) + ' · tap to open') + '</span></span>' +
+    '<span aria-hidden="true"></span><span><h2>Check-in</h2><span class="sub">' + (S.open ? 'Leave anything blank you didn’t notice' : esc(last) + ' · tap to open') + '</span></span>' +
     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>';
   if (S.open) {
     const list = (period === 'Wake' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]));
@@ -397,9 +411,10 @@ function checkinView() {
 
 function logRender() {
   if (view !== 'log') return;
-  const app = $('log-view');
-  const head = (actions) => '<header><div><div class="eyebrow">LIFE HQ</div><h1>Health log</h1></div><div class="head-actions">' + actions +
-    '<button type="button" class="icon-btn" data-act="settings" aria-label="Settings">' + GEAR + '</button></div></header>';
+  if (!$('log-main')) { $('log-view').innerHTML = '<div id="log-main"></div><div id="log-more" class="log-more"></div>'; }
+  const app = $('log-main');
+  const head = (actions) => '<div class="top"><span class="eyebrow">LIFE HQ</span><div class="top-actions">' + actions +
+    '<button type="button" class="icon-btn" data-act="settings" aria-label="Settings">' + GEAR + '</button></div></div><h1 class="page-title">Health log</h1>';
   if (!Conn.canLog()) {
     app.innerHTML = head('') + '<div class="notice">Pair this icon once to start logging. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
       '<button type="button" class="log wide" data-act="pair">Pair this icon</button></div>';
@@ -420,8 +435,9 @@ function logRender() {
     trialView() + checkinView() +
     '<section class="card" aria-label="Medication"><div class="card-head"><h2>Medication</h2><button type="button" class="log" data-act="meds"' + (medsChosen ? '' : ' disabled') + '>' + (medsChosen ? 'Log ' + medsChosen : 'Log') + '</button></div>' +
       '<div class="chips">' + (cfg.meds || []).map((m) =>
-        '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + chipDose(m) + '</button>').join('') +
+        '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '">' + dueDot(m) + '<b>' + esc(m.name) + '</b>' + chipDose(m) + '</button>').join('') +
         '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' +
+      ((cfg.meds || []).some((m) => dueDot(m)) ? '<div class="due-key"><span class="due" aria-hidden="true"></span> not logged yet today</div>' : '') +
       doseRows() + historyView() + '</section>' + bowelView() +
     '<section class="card" aria-label="Food"><h2>Food</h2>' +
       '<div class="inline-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
@@ -434,6 +450,17 @@ function logRender() {
         '<span class="st' + (r.status === 'failed' ? ' bad' : '') + '">' + (r.status === 'saved' ? 'Saved' : r.status === 'failed' ? 'Not saved' : 'Waiting') + '</span>') + '</div>').join('') + '</section>' : '') +
     '';
   updateCheckButton();
+}
+
+/* Quiet marker on routine medicines not yet logged this health day (as-needed ones = several doses). */
+function dueDot(m) {
+  if (medOptions(m).length > 1) return '';
+  const hk = healthKey(new Date());
+  let n = ((cfg.today || {}).meds || {})[m.name] || 0;
+  n += recent.filter((r) => r.kind === 'meds' && r.hday === hk && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)).length;
+  const per = m.perDay || 1;
+  if (n >= per) return '';
+  return '<span class="due' + (n > 0 ? ' part' : '') + '" role="img" aria-label="' + (n > 0 ? n + ' of ' + per + ' logged today' : 'not logged yet today') + '"></span>';
 }
 
 function chipDose(m) {
@@ -458,6 +485,24 @@ function bowelView() {
       '<button type="button" class="seg" data-act="urgent" aria-pressed="' + S.urgent + '">Urgent</button></div>' +
       '<input type="text" data-field="bowelNote" value="' + esc(S.bowelNote) + '" placeholder="Note (optional)" aria-label="Bowel note" autocomplete="off">' : '') +
     '</section>';
+}
+
+function logMoreRender() {
+  const more = $('log-more');
+  if (!more) return;
+  if (!more.dataset.built) {
+    more.dataset.built = '1';
+    more.innerHTML = '<div class="tv"><div class="recent-buttons"><button id="toggle-medication" type="button" aria-expanded="false" aria-controls="medications">Recent meds</button></div>' +
+      '<div id="medications" aria-live="polite" hidden></div></div>' + fileLinks([['Health sheet', LINKS.healthSheet], ['Health GPT', LINKS.healthGpt]]);
+    $('toggle-medication').onclick = () => {
+      const open = $('medications').hidden;
+      $('medications').hidden = !open;
+      $('toggle-medication').setAttribute('aria-expanded', String(open));
+      if (open) loadExtras();
+    };
+  }
+  more.querySelector('.recent-buttons').hidden = !Conn.paired();
+  if (!Conn.paired()) $('medications').hidden = true;
 }
 
 function localInputValue(d) { return dayKey(d) + 'T' + hm(d); }
@@ -635,13 +680,8 @@ const T = {
 const TODOIST_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="5" fill="currentColor"/><path d="M5 7.5 9 9.5 19 4.5 M5 12 9 14 19 9 M5 16.5 9 18.5 19 13.5" fill="none" style="stroke:var(--bg)" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 const GPT_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" fill-rule="evenodd"><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>';
 const REFRESH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>';
-const CHAT_ICON = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 13H8l-4 3v-3H3V4h14v9Z"/></svg>';
-const SHEET_ICON = '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="1"/><path d="M3 8h14M3 12h14M8 3v14"/></svg>';
 
 function todayMarkup() {
-  const res = (name, gpt, sheet) => '<div class="resource-row"><span class="resource-name">' + name + '</span>' +
-    '<a href="' + gpt + '" target="_blank" rel="noopener" aria-label="' + name + ' GPT">' + CHAT_ICON + 'GPT</a>' +
-    '<a href="' + sheet + '" target="_blank" rel="noopener" aria-label="' + name + ' spreadsheet">' + SHEET_ICON + 'Sheet</a></div>';
   return '<div class="top"><span class="eyebrow">LIFE DASHBOARD</span><div class="top-actions">' +
       '<a class="icon-btn" href="https://app.todoist.com/app/today" target="_blank" rel="noopener" aria-label="Open Todoist">' + TODOIST_SVG + '</a>' +
       '<a class="icon-btn" href="' + GPT_URL + '" target="_blank" rel="noopener" aria-label="Open Life HQ GPT">' + GPT_SVG + '</a>' +
@@ -651,7 +691,8 @@ function todayMarkup() {
       '<button id="previous-day" type="button" aria-label="Previous day" disabled>‹</button><h1 id="day-title">Today</h1>' +
       '<button id="next-day" type="button" aria-label="Next day" disabled>›</button></div>' +
       '<p class="muted" id="date">&nbsp;</p><button id="back-to-today" type="button" hidden>Back to today</button>' +
-      '<div class="stale" id="stale"></div></div>' +
+      '<div class="stale" id="stale"></div>' +
+      '<button type="button" id="tomorrow-ready" class="tomorrow-ready" hidden>Tomorrow’s plan is ready ›</button></div>' +
     '<div id="pair-prompt" class="notice pair-prompt" hidden>Pair this icon once to see your day here. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
       '<button type="button" class="log wide" id="pair-today">Pair this icon</button></div>' +
     '<div id="today-body">' +
@@ -665,22 +706,11 @@ function todayMarkup() {
     '<section id="logging" class="lower-section" aria-label="Inbox"><form id="log-form">' +
       '<textarea id="log-text" aria-label="Add something to your inbox" rows="2" maxlength="20000" placeholder="Add to inbox…"></textarea>' +
       '<div class="logging-actions"><button id="save-log" type="submit">Add to inbox</button></div>' +
-      '<div id="log-status" class="status" role="status" aria-live="polite"></div></form></section>' +
-    '<section id="recent-medication" class="lower-section"><div class="recent-buttons">' +
-      '<button id="toggle-next-days" type="button" aria-expanded="false" aria-controls="next-days">Next few days</button>' +
-      '<button id="toggle-money" type="button" aria-expanded="false" aria-controls="money-panel">Money</button>' +
-      '<button id="toggle-medication" type="button" aria-expanded="false" aria-controls="medications">Recent meds</button>' +
-      '<button id="toggle-logs" type="button" aria-expanded="false" aria-controls="recent-logs">Recent logs</button>' +
-      '<button id="toggle-links" type="button" aria-expanded="false" aria-controls="dashboard-links">Links</button></div>' +
-      '<div id="next-days" aria-live="polite" hidden></div><div id="money-panel" aria-live="polite" hidden></div>' +
-      '<nav id="dashboard-links" class="dashboard-links" aria-label="Life HQ resources" hidden>' +
-        res('Life HQ', GPT_URL, 'https://docs.google.com/spreadsheets/d/1apxgN6nt1-eRLEs4FPoLxlz_jCRTNHENTv1BKb0A3Ss/edit') +
-        res('Health', 'https://chatgpt.com/g/g-p-6aa91f74be24819194dbc4a27bbefa83/project', 'https://docs.google.com/spreadsheets/d/1QkafN7IUI48_fNUCXt7eW6dty-is6qXV-SKTliwmRLY/edit') +
-        res('Finances', 'https://chatgpt.com/g/g-p-6acf8514eb3c8191911f0206654c6568/project', 'https://docs.google.com/spreadsheets/d/1BTDWxXeNIoe106swS5elL95POGdvddpM-4BMJGzoLko/edit') +
-        '<div class="extra-resources"><a href="https://docs.google.com/spreadsheets/d/1y5eEXAtQMUYAlrEbTkOHcwdi0AqoSR7V6O9CbTYBBB4/edit" target="_blank" rel="noopener">Works &amp; Royalties</a><span aria-hidden="true">•</span>' +
-        '<a href="https://docs.google.com/spreadsheets/d/1Ol5M26V3L-Bt-d_MIPrL6o6es7f2o28l28lhtaRUsgU/edit" target="_blank" rel="noopener">Inventory</a></div>' +
-        '<button id="test-celebration" type="button">Test celebration</button></nav>' +
-      '<div id="recent-logs" aria-live="polite" hidden></div><div id="medications" aria-live="polite" hidden></div></section>' +
+      '<div id="log-status" class="status" role="status" aria-live="polite"></div></form>' +
+      '<div id="inbox-queue" class="queue-note" hidden></div></section>' +
+    '<section id="recent-section" class="lower-section"><div class="recent-buttons">' +
+      '<button id="toggle-logs" type="button" aria-expanded="false" aria-controls="recent-logs">Recent inbox entries</button></div>' +
+      '<div id="recent-logs" aria-live="polite" hidden></div>' + fileLinks([['Life HQ sheet', LINKS.hqSheet]]) + '</section>' +
     '</div>';
 }
 
@@ -696,17 +726,22 @@ function buildToday() {
     $('toggle').textContent = showing ? 'Hide optional work' : 'Show optional work';
     $('toggle').setAttribute('aria-expanded', String(showing));
   };
-  BOTTOM_PANELS.forEach(([button, panel]) => { $(button).onclick = () => toggleBottomPanel(button, panel); });
+  $('toggle-logs').onclick = () => {
+    const open = $('recent-logs').hidden;
+    $('recent-logs').hidden = !open;
+    $('toggle-logs').setAttribute('aria-expanded', String(open));
+    if (open) loadRecentLogs();
+  };
+  $('tomorrow-ready').onclick = () => browseDay(1);
   $('log-form').onsubmit = saveInbox;
   $('previous-day').onclick = () => browseDay(-1);
   $('next-day').onclick = () => browseDay(1);
   $('back-to-today').onclick = () => { T.choice = 'today'; T.manual = false; loadDay(true); };
-  $('test-celebration').onclick = async () => { await prepareCompletionAudio(); celebrateCompletion(); };
   $('log-text').addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing || event.keyCode === 229) return;
     if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
     event.preventDefault();
-    if (event.repeat || T.saving) return;
+    if (event.repeat) return;
     $('log-form').requestSubmit();
   });
 }
@@ -718,16 +753,20 @@ function todayEnter() {
   $('today-body').hidden = !paired;
   if (!paired) { $('date').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }); return; }
   if (!T.loadedDate || Date.now() - T.lastLoad > 120000) loadDay(false);
+  else checkTomorrow();
+  renderInboxQueue(); inboxFlush();
 }
 
 function refreshToday() {
   T.lastLoad = 0;
   loadDay(false);
-  BOTTOM_PANELS.forEach(([, panel]) => { if (!$(panel).hidden) openPanel(panel); });
+  if (!$('recent-logs').hidden) loadRecentLogs();
+  inboxFlush();
 }
 
 let messageTimer = null;
 function message(text, clearAfter) {
+  if (view !== 'today' || !$('message')) { if (text && !/…$/.test(text)) toast(text); return; }
   $('message').textContent = text;
   clearTimeout(messageTimer);
   if (clearAfter) messageTimer = setTimeout(() => { if ($('message').textContent === text) $('message').textContent = ''; }, clearAfter);
@@ -757,12 +796,13 @@ async function loadDay(clear) {
   const request = ++T.req;
   const choice = T.choice;
   const usesCache = choice === null || choice === 'today';
-  const saved = usesCache ? LS.get('cache.day', null) : null;
+  const tomorrowSaved = LS.get('cache.tomorrow', null);
+  const saved = usesCache ? LS.get('cache.day', null) : (tomorrowSaved && tomorrowSaved.result && tomorrowSaved.result.date === choice ? tomorrowSaved : null);
   if (clear) {
     $('focus').replaceChildren(); $('extra').replaceChildren();
     $('day-calendar').hidden = true; $('day-notes').hidden = true;
   }
-  if (saved && saved.result && saved.result.workingDay === londonWorkingDay(T.rolloverMinutes) && (clear || !T.loadedDate)) {
+  if (saved && saved.result && (!usesCache || saved.result.workingDay === londonWorkingDay(T.rolloverMinutes)) && (clear || !T.loadedDate)) {
     try { renderDay(saved.result); } catch (e) {}
     $('stale').textContent = 'Saved copy from ' + stampTime(saved.at) + ' · updating…';
     message('');
@@ -779,6 +819,7 @@ async function loadDay(clear) {
     if (usesCache && !res.manualSelection) LS.set('cache.day', { at: Date.now(), result: res });
     $('stale').textContent = '';
     message('');
+    checkTomorrow();
   } catch (e) {
     if (request !== T.req) return;
     $('previous-day').disabled = !T.loadedDate; $('next-day').disabled = !T.loadedDate;
@@ -865,9 +906,9 @@ async function completeTodoist(id, check, row, after) {
     T.tasks = T.tasks.filter((t) => t.id !== id);
     const saved = LS.get('cache.day', null);
     if (saved && saved.result) { saved.result.tasks = (saved.result.tasks || []).filter((t) => t.id !== id); LS.set('cache.day', saved); }
-    renderTasks();
+    if (T.built) renderTasks();
     if (after) after();
-    if (!$('next-days').hidden && after !== loadNextFewDays) loadNextFewDays();
+    if ($('next-days') && after !== loadNextFewDays && T.aheadAt) loadNextFewDays();
     message('Completed in Todoist.', 5000);
     try { celebrateCompletion(); } catch (e) {}
   } catch (e) {
@@ -921,53 +962,83 @@ setInterval(() => {
 }, 60000);
 
 /* ---------- inbox ---------- */
-async function saveInbox(event) {
+/* Inbox: saved on the phone first, then sent (safe to retry: the entry ID stops duplicates). */
+let inboxQueue = LS.get('inboxQueue', []);
+let inboxSending = false;
+function renderInboxQueue() {
+  const el = $('inbox-queue');
+  if (!el) return;
+  el.hidden = !inboxQueue.length;
+  el.innerHTML = inboxQueue.length ? '<span>' + inboxQueue.length + ' inbox entr' + (inboxQueue.length === 1 ? 'y' : 'ies') + ' saved on this phone, waiting to send</span><button type="button" class="link-btn" id="inbox-send">Send now</button>' : '';
+  if (inboxQueue.length) $('inbox-send').onclick = () => inboxFlush(true);
+}
+function saveInbox(event) {
   event.preventDefault();
-  if (T.saving) return;
   const text = $('log-text').value;
   if (!text.trim()) { $('log-status').textContent = 'Enter something to save.'; return; }
-  if (!T.pendingLog || T.pendingLog.text !== text) {
-    T.pendingLog = { text, id: 'log_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2) };
-  }
-  T.saving = true;
-  $('save-log').disabled = true; $('log-text').disabled = true;
-  $('log-status').textContent = 'Saving…';
-  const restore = () => { T.saving = false; $('save-log').disabled = false; $('log-text').disabled = false; };
+  inboxQueue.push({ text, id: 'log_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2) });
+  LS.set('inboxQueue', inboxQueue);
+  $('log-text').value = '';
+  $('log-status').textContent = navigator.onLine ? 'Sending…' : 'Saved on this phone · will send when online.';
+  renderInboxQueue();
+  inboxFlush(true);
+}
+async function inboxFlush(manual) {
+  if (inboxSending || !inboxQueue.length || !Conn.paired()) return;
+  if (!navigator.onLine) { if (manual && $('log-status')) $('log-status').textContent = 'Saved on this phone · will send when online.'; return; }
+  inboxSending = true;
+  let sent = 0, problem = '';
   try {
-    const res = await dash('saveDashboardLog', [T.pendingLog.text, T.pendingLog.id]);
-    if (!res || !res.success) throw new Error('Unexpected server response');
-    restore();
-    $('log-text').value = '';
-    T.pendingLog = null;
-    $('log-status').textContent = 'Added to inbox.';
-    setTimeout(() => { if ($('log-status').textContent === 'Added to inbox.') $('log-status').textContent = ''; }, 4000);
-    if (!$('recent-logs').hidden) loadRecentLogs();
-  } catch (e) {
-    restore();
-    $('log-status').textContent = 'Could not confirm save: ' + e.message + '. Your text is still here; trying again won’t duplicate it.';
+    while (inboxQueue.length) {
+      const item = inboxQueue[0];
+      try {
+        const res = await dash('saveDashboardLog', [item.text, item.id]);
+        if (!res || !res.success) throw new Error('Unexpected server response');
+        inboxQueue.shift(); sent++;
+        LS.set('inboxQueue', inboxQueue);
+      } catch (e) {
+        if (!e.permanent) { problem = 'Saved on this phone · couldn’t reach Google yet. It will retry.'; break; }
+        inboxQueue.shift();
+        LS.set('inboxQueue', inboxQueue);
+        if ($('log-text') && !$('log-text').value.trim()) $('log-text').value = item.text;
+        problem = 'Not saved: ' + e.message + ' Your text is back in the box.';
+      }
+    }
+  } finally { inboxSending = false; LS.set('inboxQueue', inboxQueue); }
+  renderInboxQueue();
+  if ($('log-status')) {
+    if (problem) $('log-status').textContent = problem;
+    else if (sent) {
+      $('log-status').textContent = 'Added to inbox.';
+      setTimeout(() => { if ($('log-status').textContent === 'Added to inbox.') $('log-status').textContent = ''; }, 4000);
+      if (!$('recent-logs').hidden) loadRecentLogs();
+    }
   }
 }
 
+/* Tomorrow's plan: from 22:15 until the 00:40 rollover, check whether the nightly plan has been written. */
+async function checkTomorrow() {
+  const btn = $('tomorrow-ready');
+  if (!btn || !Conn.paired()) return;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date()).map((p) => [p.type, p.value]));
+  const mins = Number(parts.hour) * 60 + Number(parts.minute);
+  const evening = window.HQ_FORCE_EVENING || mins >= 22 * 60 + 15 || mins < T.rolloverMinutes;
+  const working = londonWorkingDay(T.rolloverMinutes);
+  const onToday = T.loadedDate === working && !T.manual;
+  const tomorrow = shiftDay(working, 1);
+  const saved = LS.get('cache.tomorrow', null);
+  const ready = (r) => r && r.result && r.result.date === tomorrow && /^\s*•\s/m.test(String(r.result.notes || ''));
+  btn.hidden = !(evening && onToday && ready(saved));
+  if (!evening || !onToday || ready(saved) || (saved && saved.result && saved.result.date === tomorrow && Date.now() - saved.at < 10 * 60000)) return;
+  try {
+    const result = await dash('getDashboardDay', [tomorrow]);
+    LS.set('cache.tomorrow', { at: Date.now(), result });
+    btn.hidden = !(ready({ result }) && T.loadedDate === working && !T.manual);
+  } catch (e) {}
+}
+
 /* ---------- bottom panels ---------- */
-const BOTTOM_PANELS = [
-  ['toggle-next-days', 'next-days'], ['toggle-money', 'money-panel'], ['toggle-medication', 'medications'],
-  ['toggle-logs', 'recent-logs'], ['toggle-links', 'dashboard-links']
-];
-function toggleBottomPanel(buttonId, panelId) {
-  const opening = $(panelId).hidden;
-  BOTTOM_PANELS.forEach(([button, panel]) => {
-    const active = opening && panel === panelId;
-    $(panel).hidden = !active;
-    $(button).setAttribute('aria-expanded', String(active));
-  });
-  if (opening) openPanel(panelId);
-}
-function openPanel(panelId) {
-  if (panelId === 'recent-logs') loadRecentLogs();
-  if (panelId === 'next-days') loadNextFewDays();
-  if (panelId === 'money-panel') loadMoney();
-  if (panelId === 'medications') loadExtras();
-}
 function showPanelLoading(panel, text) {
   const loading = document.createElement('span');
   loading.className = 'panel-loading';
@@ -994,6 +1065,32 @@ async function panelLoad(fn, panelId, render, loadingText) {
     else panel.textContent = 'Couldn’t load: ' + e.message;
   }
 }
+
+/* ---------- Ahead and Money pages ---------- */
+function pageHead(name, title) {
+  return '<div class="top"><span class="eyebrow">LIFE HQ</span><div class="top-actions">' +
+    '<button type="button" class="icon-btn" id="' + name + '-refresh" aria-label="Refresh">' + REFRESH_SVG + '</button>' +
+    '<button type="button" class="icon-btn" id="' + name + '-settings" aria-label="Settings">' + GEAR + '</button></div></div>' +
+    '<h1 class="page-title">' + title + '</h1>' +
+    '<div id="' + name + '-pair" class="notice pair-prompt" hidden>Pair this icon once to see this page. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
+    '<button type="button" class="log wide" id="' + name + '-pair-btn">Pair this icon</button></div>';
+}
+function pageEnter(name, title, panelId, after, load, stampKey) {
+  const el = $(name + '-view');
+  if (!el.dataset.built) {
+    el.dataset.built = '1';
+    el.innerHTML = pageHead(name, title) + '<div id="' + panelId + '" aria-live="polite"></div>' + after;
+    $(name + '-refresh').onclick = () => { T[stampKey] = Date.now(); load(); };
+    $(name + '-settings').onclick = () => openSettings();
+    $(name + '-pair-btn').onclick = () => openSettings('pair');
+  }
+  const paired = Conn.paired();
+  $(name + '-pair').hidden = paired;
+  $(panelId).hidden = !paired;
+  if (paired && (!T[stampKey] || Date.now() - T[stampKey] > 120000)) { T[stampKey] = Date.now(); load(); }
+}
+function aheadEnter() { pageEnter('ahead', 'Ahead', 'next-days', '', loadNextFewDays, 'aheadAt'); }
+function moneyEnter() { pageEnter('money', 'Money', 'money-panel', fileLinks([['Finances sheet', LINKS.moneySheet], ['Finances GPT', LINKS.moneyGpt]]), loadMoney, 'moneyAt'); }
 
 function loadNextFewDays() {
   const panel = $('next-days');
@@ -1283,11 +1380,13 @@ document.addEventListener('submit', (ev) => {
   if (ev.target.id === 'pair-form') { ev.preventDefault(); pairSubmit(); }
 });
 
-window.addEventListener('online', logFlush);
+window.addEventListener('online', () => { logFlush(); inboxFlush(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   logFlush();
   if (view === 'log') { logRender(); logRefreshConfig(); }
+  inboxFlush();
+  if ((view === 'ahead' || view === 'money') && Conn.paired()) showView(view);
   if (view === 'today' && Conn.paired()) {
     if (T.loadedDate && !T.manual && londonWorkingDay(T.rolloverMinutes) !== T.loadedDate) { T.choice = null; loadDay(true); }
     else if (Date.now() - T.lastLoad > 120000) loadDay(false);
@@ -1308,7 +1407,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController || reloaded) return;
     reloaded = true;
-    const busy = Object.keys(pending).length || T.saving || T.completing.size || (document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName));
+    const busy = Object.keys(pending).length || inboxSending || T.completing.size || (document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName));
     if (!busy) location.reload();
   });
   navigator.serviceWorker.register(BASE + 'sw.js', { scope: BASE }).then((reg) => {
