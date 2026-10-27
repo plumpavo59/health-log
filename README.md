@@ -1,7 +1,10 @@
-# Health log
+# Life HQ phone app
 
-A small phone page for logging medication, bowel movements, food and symptom check-ins.
+Two Home Screen icons, one app:
 
-- This repository holds only the empty form. No health data is stored here.
-- Entries go straight from the phone to the owner's private Google Apps Script, which appends them to a private Google Sheet.
-- The script address and key are entered once on the phone and kept in that phone's local storage only.
+- **Health log** — https://plumpavo59.github.io/health-log/ (one-tap meds, bowel, food, check-ins)
+- **Today** — https://plumpavo59.github.io/health-log/today/ (the Life Dashboard: day plan, calendar, tasks, inbox, money)
+
+Both talk only to the private **Ru - Inbox Receiver** Apps Script. Each icon is paired once with a
+setup code (run `pairNewDevice` in that script). No personal data is stored in this repository.
+Settings (gear icon) has Light / Dark / Match phone, pairing and the paired-device list.

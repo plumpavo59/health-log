@@ -1,7 +1,8 @@
-/* Health log service worker: opens instantly from cache, updates in the background.
+/* Life HQ service worker: opens instantly from cache, updates in the background.
    Only this site's own files are cached. Requests to Google are never touched. */
-const CACHE = 'health-log-v4';
-const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
+const CACHE = 'life-hq-v5';
+const SHELL = ['./', './index.html', './app.js', './app.css', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png',
+  './today/', './today/index.html', './today/manifest.webmanifest', './today/icon-192.png', './today/icon-512.png', './today/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
@@ -16,10 +17,11 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   e.respondWith(caches.open(CACHE).then(async (cache) => {
-    const key = e.request.mode === 'navigate' ? './index.html' : e.request;
+    let key = e.request;
+    if (e.request.mode === 'navigate') key = /\/today\/?(index\.html)?$/.test(url.pathname) ? './today/index.html' : './index.html';
     const hit = await cache.match(key, { ignoreSearch: true });
     const update = fetch(e.request, { cache: 'no-cache' }).then((res) => {
-      if (res && res.ok) cache.put(key, res.clone());
+      if (res && res.ok && !res.redirected) cache.put(key, res.clone());
       return res;
     }).catch(() => null);
     if (hit) { e.waitUntil(update); return hit; }
