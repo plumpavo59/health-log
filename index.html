@@ -42,7 +42,9 @@ h2{margin:0;font-size:16px;font-weight:650}
 .wide{min-height:48px;width:100%}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{min-height:44px;padding:0 14px;border-radius:22px;font-size:15px;display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff}
-.chip small{font-size:13px;opacity:.75}
+.chip b{font-size:16px;font-weight:600}
+.chip small{font-size:14px;color:#444}
+.chip[aria-pressed=true] small{color:#e6e6e6}
 .chip[aria-pressed=true],.seg[aria-pressed=true],.sq[aria-pressed=true]{border-color:var(--ink);background:var(--ink);color:#fff}
 .chip.food{min-height:40px;font-size:14px;border-color:#c8c8c8}
 .chip.other{border-style:dashed;border-color:var(--faint);color:var(--muted)}
@@ -72,6 +74,27 @@ input[type=range].unset::-webkit-slider-thumb{background:#fff;border:2px solid v
 input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:#c8c8c8}
 input[type=range]::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:var(--ink);border:0}
 input[type=range].unset::-moz-range-thumb{background:#fff;border:2px solid var(--faint)}
+.hist{display:flex;flex-direction:column;gap:2px;margin-top:4px;padding-top:9px;border-top:1px solid #e2e2e2}
+.hist-row{display:grid;grid-template-columns:96px minmax(0,1fr) 40px;align-items:center;gap:8px;min-height:30px;padding:0;border:0;background:transparent;text-align:left;width:100%}
+.hist-row.head{min-height:16px}
+.hist-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hist-cells{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:3px}
+.hist-cells span{display:block;height:16px;border-radius:3px;border:1px solid #c8c8c8;background:#fff}
+.hist-cells span.on{background:var(--ink);border-color:var(--ink)}
+.hist-cells span.part{background:linear-gradient(to top,var(--ink) 50%,#fff 50%);border-color:var(--ink)}
+.hist-cells span.today{outline:2px solid var(--ink);outline-offset:1px}
+.hist-letters{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:3px;font-size:10px;color:var(--muted);text-align:center}
+.hist-letters b{color:var(--ink)}
+.hist-n{font-size:13px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.cal{display:flex;flex-direction:column;gap:6px;padding:8px 0 4px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cal-grid .dow{font-size:11px;color:var(--muted);text-align:center}
+.cal-grid .d{height:34px;border-radius:7px;border:1px solid #d4d4d4;display:flex;align-items:center;justify-content:center;font-size:13px;font-variant-numeric:tabular-nums}
+.cal-grid .d.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.cal-grid .d.part{background:linear-gradient(to top,var(--ink) 50%,#fff 50%);border-color:var(--ink);color:var(--ink)}
+.cal-grid .d.today{outline:2px solid var(--ink);outline-offset:1px}
+.cal-grid .d.blank{border:0}
+.cal-sum{font-size:13px;color:var(--muted)}
 .recent h2{font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted);margin-bottom:4px}
 .row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:44px;border-bottom:1px solid #e2e2e2;font-size:14px}
 .row .t{color:var(--muted);font-variant-numeric:tabular-nums}
@@ -97,7 +120,7 @@ input[type=range].unset::-moz-range-thumb{background:#fff;border:2px solid var(-
 <script>
 'use strict';
 const UNDO_MS = 5000;
-const APP_VERSION = 'v3 · 27 Oct';
+const APP_VERSION = 'v4 · 27 Oct';
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('hl.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem('hl.' + k, JSON.stringify(v)); } catch (e) {} }
@@ -118,6 +141,10 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':
 const pad = (n) => String(n).padStart(2, '0');
 const hm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
 const dayKey = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const DAY_START_HOUR = 4;
+const healthKey = (d) => dayKey(new Date(d.getTime() - DAY_START_HOUR * 3600000));
+const keyToDate = (k) => { const p = k.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2], 12); };
+const addDays = (k, n) => { const d = keyToDate(k); d.setDate(d.getDate() + n); return dayKey(d); };
 const newId = () => 'app_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 
 let cached = LS.get('config', null);
@@ -137,7 +164,7 @@ function guessPeriod() {
 
 const S = {
   setup: !(LS.get('endpoint', '') && LS.get('key', '')),
-  open: false, period: null, scores: {}, checkNote: '',
+  open: false, period: null, scores: {}, checkNote: '', calMed: null,
   bristol: null, size: null, urgent: false, bowelNote: '',
   meds: [], food: '', time: null, timeOpen: false
 };
@@ -164,10 +191,68 @@ function trialView() {
     '<div class="trial-top"><span>CURRENT TRIAL</span>' + (t.ends ? '<span>ends ' + esc(t.ends) + '</span>' : '') + '</div>' +
     '<div class="trial-name">' + esc(t.name) + (t.day ? ' · day ' + esc(t.day) + (t.length ? ' of ' + esc(t.length) : '') : '') + '</div>' +
     (t.focus ? '<div class="trial-focus">Focus: ' + esc(t.focus) + '</div>' : '') +
-    (counts.length ? '<div class="trial-today">Today: ' + counts.join(' · ') + '</div>' : '') +
     (showBtn ? '<button type="button" class="trial-btn" data-act="trial">' + esc(t.button) + '</button>' : '') +
     (doneAt && t.button ? '<div class="trial-today">' + esc(t.button.replace(/ now$/i, '')) + ' at ' + esc(doneAt) + ' · logged</div>' : '') +
     '</section>';
+}
+
+/* Medication history: health days (before 04:00 counts as the previous day). */
+function medCounts() {
+  const h = cfg.history;
+  if (!h || !Array.isArray(h.meds)) return null;
+  const map = {};
+  h.meds.forEach((m) => {
+    const byDay = {};
+    (m.counts || []).forEach((n, i) => { if (n) byDay[addDays(h.startKey, i)] = n; });
+    recent.forEach((r) => {
+      if (r.kind === 'meds' && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)) {
+        const k = r.hday || r.day; byDay[k] = (byDay[k] || 0) + 1;
+      }
+    });
+    map[m.name] = { perDay: m.perDay || 1, byDay };
+  });
+  return map;
+}
+
+function historyView() {
+  const data = medCounts();
+  if (!data || !Object.keys(data).length) return '';
+  const today = healthKey(new Date());
+  const keys = Array.from({ length: 14 }, (_, i) => addDays(today, i - 13));
+  const L = 'SMTWTFS';
+  const cls = (n, per, k) => (n >= per ? 'on' : n > 0 ? 'part' : '') + (k === today ? ' today' : '');
+  let html = '<div class="hist" aria-label="Medication history, last 14 days">' +
+    '<div class="hist-row head"><span class="small">Last 14 days</span><span class="hist-letters" aria-hidden="true">' +
+    keys.map((k) => (k === today ? '<b>' : '<span>') + L[keyToDate(k).getDay()] + (k === today ? '</b>' : '</span>')).join('') + '</span><span></span></div>';
+  Object.keys(data).forEach((name) => {
+    const d = data[name];
+    const taken = keys.filter((k) => (d.byDay[k] || 0) > 0).length;
+    html += '<button type="button" class="hist-row" data-act="cal" data-v="' + esc(name) + '" aria-expanded="' + (S.calMed === name) + '" aria-label="' + esc(name) + ': logged on ' + taken + ' of the last 14 days. Show calendar">' +
+      '<span class="hist-name">' + esc(name) + '</span><span class="hist-cells">' +
+      keys.map((k) => '<span class="' + cls(d.byDay[k] || 0, d.perDay, k) + '"></span>').join('') + '</span>' +
+      '<span class="hist-n">' + taken + '/14</span></button>';
+    if (S.calMed === name) html += calendarView(name, d, today, cls);
+  });
+  return html + '</div>';
+}
+
+function calendarView(name, d, today, cls) {
+  const first = addDays(today, -41);
+  const offset = (keyToDate(first).getDay() + 6) % 7;
+  const start = addDays(first, -offset);
+  const total = offset + 42 + (6 - (keyToDate(today).getDay() + 6) % 7);
+  let cells = '';
+  for (let i = 0; i < total; i++) {
+    const k = addDays(start, i);
+    if (k < first || k > today) { cells += '<span class="d blank"></span>'; continue; }
+    const n = d.byDay[k] || 0;
+    const date = keyToDate(k);
+    cells += '<span class="d ' + cls(n, d.perDay, k) + '" title="' + esc(k) + (n ? ': ' + n : '') + '">' + (date.getDate() === 1 ? '<small style="font-size:11px">1 ' + date.toLocaleDateString('en-GB', { month: 'short' }) + '</small>' : date.getDate()) + '</span>';
+  }
+  const count = (days) => Array.from({ length: days }, (_, i) => addDays(today, -i)).filter((k) => (d.byDay[k] || 0) > 0).length;
+  return '<div class="cal"><div class="cal-sum">' + esc(name) + ' · last 7 days ' + count(7) + ' · last 14 ' + count(14) + ' · last 6 weeks ' + count(42) + '</div>' +
+    '<div class="cal-grid">' + ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((x) => '<span class="dow">' + x + '</span>').join('') + cells + '</div>' +
+    '<div class="cal-sum">Dark = logged' + (d.perDay > 1 ? ' · half = some of ' + d.perDay + ' doses' : '') + ' · before 4am counts as the night before</div></div>';
 }
 
 function checkinView() {
@@ -226,7 +311,7 @@ function render() {
       '<div class="chips">' + (cfg.meds || []).map((m) =>
         '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + (m.strength ? '<small>' + esc(m.strength) + '</small>' : '') + '</button>').join('') +
         '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' +
-      ((cfg.adherence || []).length ? '<div class="small">Logged in the last 14 days: ' + cfg.adherence.map((a) => esc(a.name) + ' ' + esc(a.days) + '/' + esc(a.of)).join(' · ') + '</div>' : '') + '</section>' +
+      historyView() + '</section>' +
     '<section class="card" aria-label="Food"><h2>Food</h2>' +
       '<div class="inline-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
       '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button></div>' +
@@ -278,7 +363,7 @@ function saveLocal() { LS.set('recent', recent.slice(0, 40)); LS.set('queue', qu
 function commit(kind, payload, label, extra) {
   const when = S.time || new Date();
   const entry = Object.assign({ kind, entryId: newId(), time: when.toISOString(), timeSet: !!S.time }, payload);
-  recent.unshift(Object.assign({ id: entry.entryId, day: dayKey(when), hm: hm(when), text: label, kind, status: 'pending' }, extra || {}));
+  recent.unshift(Object.assign({ id: entry.entryId, day: dayKey(when), hday: healthKey(when), hm: hm(when), text: label, kind, status: 'pending' }, extra || {}));
   S.time = null; S.timeOpen = false;
   saveLocal();
   pending[entry.entryId] = setTimeout(() => {
@@ -346,7 +431,7 @@ async function refreshConfig(showResult) {
   try {
     const res = await post({ action: 'config' });
     if (res && res.success) {
-      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, adherence: res.adherence || [], today: res.today || FALLBACK.today };
+      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, today: res.today || FALLBACK.today };
       LS.set('config', { data: cfg, day: dayKey(new Date()) });
       if (showResult) toast('Connected ✓');
       render();
@@ -367,6 +452,7 @@ document.addEventListener('click', (ev) => {
   else if (act === 'size') { S.size = S.size === v ? null : v; render(); }
   else if (act === 'urgent') { S.urgent = !S.urgent; render(); }
   else if (act === 'med') { S.meds = S.meds.includes(v) ? S.meds.filter((x) => x !== v) : S.meds.concat(v); render(); }
+  else if (act === 'cal') { S.calMed = S.calMed === v ? null : v; render(); }
   else if (act === 'other-med') { toast('Other medication: use the Siri inbox for now'); }
   else if (act === 'food-chip') { const f = S.food.trim().replace(/,$/, ''); S.food = f ? f + ', ' + v.toLowerCase() : v; render(); }
   else if (act === 'time') { S.timeOpen = !S.timeOpen; render(); }
