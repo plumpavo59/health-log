@@ -19,20 +19,23 @@
 [hidden]{display:none!important}
 html,body{margin:0;background:#fff;color:var(--ink);font-family:-apple-system,system-ui,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
 body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
-main{max-width:520px;margin:0 auto;padding:0 16px 120px;display:flex;flex-direction:column;gap:16px}
+main{max-width:520px;margin:0 auto;padding:0 14px 110px;display:flex;flex-direction:column;gap:12px}
 button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 button:disabled{cursor:default}
 button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
 input[type=text],input[type=url],input[type=password],input[type=datetime-local]{font:inherit;font-size:16px;color:inherit;width:100%;min-height:46px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
-header{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;padding:18px 0 4px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;padding:12px 0 2px}
 .eyebrow{font-size:11px;letter-spacing:.08em;color:var(--muted)}
-h1{margin:0;font-size:28px;line-height:1.1}
-h2{margin:0;font-size:17px;font-weight:650}
+h1{margin:0;font-size:25px;line-height:1.1}
+h2{margin:0;font-size:16px;font-weight:650}
 .head-actions{display:flex;gap:6px;align-items:center}
 .pill{display:flex;align-items:center;gap:6px;min-height:44px;padding:0 14px;border:1px solid var(--line);border-radius:22px;background:#fff;font-size:15px;white-space:nowrap}
 .pill.set{border-color:var(--ink);background:var(--ink);color:#fff}
 .icon-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:0;border-radius:22px;background:transparent;color:var(--muted)}
-.card{border:1px solid var(--ink);border-radius:16px;box-shadow:3px 3px 0 var(--ink);padding:14px;display:flex;flex-direction:column;gap:12px;background:#fff}
+.card{border:1px solid var(--ink);border-radius:14px;box-shadow:3px 3px 0 var(--ink);padding:11px 12px 12px;display:flex;flex-direction:column;gap:9px;background:#fff}
+.inline-row{display:flex;gap:8px;align-items:center}
+.inline-row input{flex:1;min-width:0}
+.inline-row .log{min-height:46px;flex:none}
 .card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .log{min-height:40px;padding:0 18px;border-radius:20px;font-size:15px;font-weight:600;border:1px solid var(--ink);background:var(--ink);color:#fff}
 .log:disabled{border-color:#d4d4d4;background:#fff;color:var(--faint)}
@@ -46,15 +49,15 @@ h2{margin:0;font-size:17px;font-weight:650}
 .grid7{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
 .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 .grid-size{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 84px;gap:6px}
-.sq{min-height:48px;border-radius:10px;font-size:18px;font-weight:650;border:1px solid var(--line);background:#fff}
+.sq{min-height:44px;border-radius:10px;font-size:18px;font-weight:650;border:1px solid var(--line);background:#fff}
 .seg{min-height:44px;border-radius:10px;font-size:15px;border:1px solid var(--line);background:#fff}
-.trial{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:14px;background:var(--soft)}
+.trial{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:12px;background:var(--soft)}
 .trial-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12px;letter-spacing:.06em;color:var(--muted)}
 .trial-name{font-size:16px;font-weight:650}
 .trial-focus{font-size:14px;line-height:1.4;color:#3a3a3a}
 .trial-today{font-size:13px;color:var(--muted)}
-.trial-btn{align-self:flex-start;min-height:44px;padding:0 16px;border:1px solid var(--ink);border-radius:22px;background:#fff;font-size:15px;font-weight:600;margin-top:4px}
-.check-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:0;border:0;background:transparent;text-align:left}
+.trial-btn{align-self:flex-start;min-height:42px;padding:0 16px;border:1px solid var(--ink);border-radius:21px;background:#fff;font-size:15px;font-weight:600;margin-top:5px}
+.check-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:0;border:0;background:transparent;text-align:left}
 .check-toggle .sub{display:block;font-size:13px;color:var(--muted);margin-top:2px}
 .check-toggle svg{transition:transform .15s}
 .check-toggle[aria-expanded=true] svg{transform:rotate(90deg)}
@@ -210,19 +213,22 @@ function render() {
       '<input id="time-input" type="datetime-local" value="' + localInputValue(S.time || now) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '">' +
       '<div class="btns"><button type="button" class="log" data-act="time-set">Use this time</button><button type="button" class="seg" data-act="time-now">Now</button></div></div>' : '') +
     trialView() + checkinView() +
-    '<section class="card" aria-label="Bowel"><div class="card-head"><h2>Bowel</h2><button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button></div>' +
+    '<section class="card" aria-label="Bowel"><h2>Bowel</h2>' +
       '<div class="grid7" role="group" aria-label="Bristol type">' + [1, 2, 3, 4, 5, 6, 7].map((n) =>
         '<button type="button" class="sq" data-act="bristol" data-v="' + n + '" aria-pressed="' + (S.bristol === n) + '" aria-label="Bristol type ' + n + '">' + n + '</button>').join('') + '</div>' +
       '<div class="grid-size" role="group" aria-label="Size">' + ['Small', 'Medium', 'Large'].map((z) =>
         '<button type="button" class="seg" data-act="size" data-v="' + z + '" aria-pressed="' + (S.size === z) + '">' + z + '</button>').join('') +
         '<button type="button" class="seg" data-act="urgent" aria-pressed="' + S.urgent + '">Urgent</button></div>' +
-      '<input type="text" data-field="bowelNote" value="' + esc(S.bowelNote) + '" placeholder="Note (optional)" aria-label="Bowel note" autocomplete="off"></section>' +
+      '<div class="inline-row"><input type="text" data-field="bowelNote" value="' + esc(S.bowelNote) + '" placeholder="Note (optional)" aria-label="Bowel note" autocomplete="off">' +
+      '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button></div></section>' +
     '<section class="card" aria-label="Medication"><div class="card-head"><h2>Medication</h2><button type="button" class="log" data-act="meds"' + (medsChosen ? '' : ' disabled') + '>' + (medsChosen ? 'Log ' + medsChosen : 'Log') + '</button></div>' +
       '<div class="chips">' + (cfg.meds || []).map((m) =>
         '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + (m.strength ? '<small>' + esc(m.strength) + '</small>' : '') + '</button>').join('') +
-        '<button type="button" class="chip other" data-act="other-med">Other…</button></div></section>' +
-    '<section class="card" aria-label="Food"><div class="card-head"><h2>Food</h2><button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button></div>' +
-      '<input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
+        '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' +
+      ((cfg.adherence || []).length ? '<div class="small">Logged in the last 14 days: ' + cfg.adherence.map((a) => esc(a.name) + ' ' + esc(a.days) + '/' + esc(a.of)).join(' · ') + '</div>' : '') + '</section>' +
+    '<section class="card" aria-label="Food"><h2>Food</h2>' +
+      '<div class="inline-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
+      '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button></div>' +
       '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div></section>' +
     (waiting ? '<div class="queue-note"><span>' + waiting + ' waiting to send</span><button type="button" class="link-btn" data-act="flush">Send now</button></div>' : '') +
     (rows.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + rows.map((r) =>
@@ -338,7 +344,7 @@ async function refreshConfig(showResult) {
   try {
     const res = await post({ action: 'config' });
     if (res && res.success) {
-      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, today: res.today || FALLBACK.today };
+      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, adherence: res.adherence || [], today: res.today || FALLBACK.today };
       LS.set('config', { data: cfg, day: dayKey(new Date()) });
       if (showResult) toast('Connected ✓');
       render();

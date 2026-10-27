@@ -1,6 +1,6 @@
 /* Health log service worker: opens instantly from cache, updates in the background.
    Only this site's own files are cached. Requests to Google are never touched. */
-const CACHE = 'health-log-v1';
+const CACHE = 'health-log-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
