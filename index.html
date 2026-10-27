@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Health log">
+<meta name="referrer" content="no-referrer">
+<title>Health log</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<style>
+:root{--ink:#202020;--muted:#575757;--faint:#8a8a8a;--line:#b9b9b9;--soft:#f2f2f0;color-scheme:light}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:#fff;color:var(--ink);font-family:-apple-system,system-ui,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+main{max-width:520px;margin:0 auto;padding:0 16px 120px;display:flex;flex-direction:column;gap:16px}
+button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+button:disabled{cursor:default}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+input[type=text],input[type=url],input[type=password],input[type=datetime-local]{font:inherit;font-size:16px;color:inherit;width:100%;min-height:46px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;padding:18px 0 4px}
+.eyebrow{font-size:11px;letter-spacing:.08em;color:var(--muted)}
+h1{margin:0;font-size:28px;line-height:1.1}
+h2{margin:0;font-size:17px;font-weight:650}
+.head-actions{display:flex;gap:6px;align-items:center}
+.pill{display:flex;align-items:center;gap:6px;min-height:44px;padding:0 14px;border:1px solid var(--line);border-radius:22px;background:#fff;font-size:15px;white-space:nowrap}
+.pill.set{border-color:var(--ink);background:var(--ink);color:#fff}
+.icon-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:0;border-radius:22px;background:transparent;color:var(--muted)}
+.card{border:1px solid var(--ink);border-radius:16px;box-shadow:3px 3px 0 var(--ink);padding:14px;display:flex;flex-direction:column;gap:12px;background:#fff}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.log{min-height:40px;padding:0 18px;border-radius:20px;font-size:15px;font-weight:600;border:1px solid var(--ink);background:var(--ink);color:#fff}
+.log:disabled{border-color:#d4d4d4;background:#fff;color:var(--faint)}
+.wide{min-height:48px;width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{min-height:44px;padding:0 14px;border-radius:22px;font-size:15px;display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff}
+.chip small{font-size:13px;opacity:.75}
+.chip[aria-pressed=true],.seg[aria-pressed=true],.sq[aria-pressed=true]{border-color:var(--ink);background:var(--ink);color:#fff}
+.chip.food{min-height:40px;font-size:14px;border-color:#c8c8c8}
+.chip.other{border-style:dashed;border-color:var(--faint);color:var(--muted)}
+.grid7{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.grid-size{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 84px;gap:6px}
+.sq{min-height:48px;border-radius:10px;font-size:18px;font-weight:650;border:1px solid var(--line);background:#fff}
+.seg{min-height:44px;border-radius:10px;font-size:15px;border:1px solid var(--line);background:#fff}
+.trial{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:14px;background:var(--soft)}
+.trial-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12px;letter-spacing:.06em;color:var(--muted)}
+.trial-name{font-size:16px;font-weight:650}
+.trial-focus{font-size:14px;line-height:1.4;color:#3a3a3a}
+.trial-today{font-size:13px;color:var(--muted)}
+.trial-btn{align-self:flex-start;min-height:44px;padding:0 16px;border:1px solid var(--ink);border-radius:22px;background:#fff;font-size:15px;font-weight:600;margin-top:4px}
+.check-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:0;border:0;background:transparent;text-align:left}
+.check-toggle .sub{display:block;font-size:13px;color:var(--muted);margin-top:2px}
+.check-toggle svg{transition:transform .15s}
+.check-toggle[aria-expanded=true] svg{transform:rotate(90deg)}
+.scale{display:grid;grid-template-columns:110px minmax(0,1fr) 38px;align-items:center;gap:10px}
+.scale label{font-size:15px}
+.scale output{font-size:16px;font-weight:650;text-align:right;font-variant-numeric:tabular-nums}
+.scale output.unset{color:var(--faint);font-weight:400}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:40px;background:transparent;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:#c8c8c8}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;border-radius:50%;background:var(--ink);margin-top:-12px;border:0}
+input[type=range].unset::-webkit-slider-thumb{background:#fff;border:2px solid var(--faint)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:#c8c8c8}
+input[type=range]::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:var(--ink);border:0}
+input[type=range].unset::-moz-range-thumb{background:#fff;border:2px solid var(--faint)}
+.recent h2{font-size:13px;font-weight:500;letter-spacing:.06em;color:var(--muted);margin-bottom:4px}
+.row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:44px;border-bottom:1px solid #e2e2e2;font-size:14px}
+.row .t{color:var(--muted);font-variant-numeric:tabular-nums}
+.row .st{font-size:12px;color:var(--muted);white-space:nowrap}
+.row .st.bad{color:#9b1c1c}
+.link-btn{min-height:36px;padding:0 6px;border:0;background:transparent;color:var(--muted);font-size:13px;text-decoration:underline}
+.time-panel{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--line);border-radius:12px}
+.time-panel .btns{display:flex;gap:8px}
+.time-panel .btns button{flex:1}
+.queue-note{font-size:13px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.setup{display:flex;flex-direction:column;gap:12px;padding-top:12px}
+.setup p{margin:0;font-size:15px;line-height:1.45;color:#3a3a3a}
+.setup label{font-size:14px;font-weight:600}
+.small{font-size:13px;color:var(--muted)}
+#toast{position:fixed;left:16px;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));max-width:488px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:12px 14px 12px 16px;border-radius:14px;background:var(--ink);color:#fff;font-size:15px;z-index:10}
+#toast span{flex:1}
+#toast button{min-height:40px;padding:0 12px;border:1px solid #fff;border-radius:20px;background:transparent;color:#fff;font-size:14px;font-weight:600}
+</style>
+</head>
+<body>
+<main id="app" aria-live="off"></main>
+<div id="toast" role="status" aria-live="polite" hidden><span id="toast-text"></span><button id="toast-btn" type="button" hidden>Undo</button></div>
+<script>
+'use strict';
+const UNDO_MS = 5000;
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('hl.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('hl.' + k, JSON.stringify(v)); } catch (e) {} }
+};
+const FALLBACK = {
+  meds: [{ name: 'Celecoxib', strength: '200 mg', perDay: 2 }, { name: 'Omeprazole', strength: '20 mg', perDay: 1 },
+    { name: 'Elvanse', strength: '30 mg', perDay: 1 }, { name: 'Amitriptyline', strength: '10 mg', perDay: 1 },
+    { name: 'Symprove', strength: '70 ml', perDay: 1 }],
+  foods: ['Green apple', 'Dark chocolate', 'Cashews', 'Onigiri', 'Samosa', 'Coffee with oat milk', 'Chai with oat milk'],
+  trial: null, today: { meds: {}, wakeAt: '', lastCheckin: '' }
+};
+const SCALES = [['pain', 'Pain'], ['stiff', 'Stiffness'], ['fatigue', 'Fatigue'], ['fog', 'Brain fog'], ['headache', 'Headache'],
+  ['mood', 'Mood'], ['bloat', 'Bloating'], ['stomach', 'Stomach pain'], ['screen', 'Screen time']];
+const SLEEP = [['sleepq', 'Sleep quality', 10], ['disturb', 'Sleep disturbed', 5]];
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = (n) => String(n).padStart(2, '0');
+const hm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
+const dayKey = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const newId = () => 'app_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+
+let cached = LS.get('config', null);
+let cfg = cached && cached.data ? cached.data : FALLBACK;
+if (!cached || cached.day !== dayKey(new Date())) cfg = Object.assign({}, cfg, { today: { meds: {}, wakeAt: '', lastCheckin: '' } });
+let recent = LS.get('recent', []).filter((r) => r.day >= dayKey(new Date(Date.now() - 2 * 86400000)));
+let queue = LS.get('queue', []);
+const pending = {};
+let sending = false;
+
+function guessPeriod() {
+  const h = new Date().getHours();
+  if (h >= 22 || h < 4) return 'Bed';
+  if (h < 14 && !cfg.today.wakeAt && !recent.some((r) => r.day === dayKey(new Date()) && r.wake)) return 'Wake';
+  return 'Day';
+}
+
+const S = {
+  setup: !(LS.get('endpoint', '') && LS.get('key', '')),
+  open: false, period: null, scores: {}, checkNote: '',
+  bristol: null, size: null, urgent: false, bowelNote: '',
+  meds: [], food: '', time: null, timeOpen: false
+};
+
+/* ---------- rendering ---------- */
+function trialView() {
+  const t = cfg.trial;
+  if (!t || !t.name) return '';
+  const now = new Date();
+  const today = dayKey(now);
+  const localDone = recent.find((r) => r.day === today && r.kind === 'trial' && r.status !== 'failed');
+  const doneAt = t.buttonDoneAt || (localDone ? localDone.hm : '');
+  const woke = cfg.today.wakeAt || recent.some((r) => r.day === today && r.wake && r.status !== 'failed');
+  const inWindow = hm(now) >= (t.from || '00:00') && hm(now) <= (t.until || '23:59');
+  const showBtn = t.button && !doneAt && inWindow && (!t.needsWake || woke);
+  const counts = (t.track || []).map((name) => {
+    const med = (cfg.meds || []).find((m) => m.name.toLowerCase() === name.toLowerCase());
+    let n = (cfg.today.meds || {})[med ? med.name : name] || 0;
+    n += recent.filter((r) => r.day === today && r.kind === 'meds' && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).some((x) => x.toLowerCase() === name.toLowerCase())).length;
+    const per = med ? med.perDay : 1;
+    return esc(name.toLowerCase()) + ' ' + (n >= per ? (per > 1 ? n + ' of ' + per : 'done') : n + ' of ' + per);
+  });
+  return '<section class="trial" aria-label="Current trial">' +
+    '<div class="trial-top"><span>CURRENT TRIAL</span>' + (t.ends ? '<span>ends ' + esc(t.ends) + '</span>' : '') + '</div>' +
+    '<div class="trial-name">' + esc(t.name) + (t.day ? ' · day ' + esc(t.day) + (t.length ? ' of ' + esc(t.length) : '') : '') + '</div>' +
+    (t.focus ? '<div class="trial-focus">Focus: ' + esc(t.focus) + '</div>' : '') +
+    (counts.length ? '<div class="trial-today">Today: ' + counts.join(' · ') + '</div>' : '') +
+    (showBtn ? '<button type="button" class="trial-btn" data-act="trial">' + esc(t.button) + '</button>' : '') +
+    (doneAt && t.button ? '<div class="trial-today">' + esc(t.button.replace(/ now$/i, '')) + ' at ' + esc(doneAt) + ' · logged</div>' : '') +
+    '</section>';
+}
+
+function checkinView() {
+  const period = S.period || guessPeriod();
+  const last = cfg.today.lastCheckin ? 'Last: ' + cfg.today.lastCheckin.toLowerCase() : 'None yet today';
+  let html = '<section class="card" aria-label="Check-in">' +
+    '<button type="button" class="check-toggle" data-act="toggle" aria-expanded="' + S.open + '" aria-controls="check-body">' +
+    '<span><h2>Check-in</h2><span class="sub">' + (S.open ? 'Leave anything blank you didn’t notice' : esc(last) + ' · tap to open') + '</span></span>' +
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>';
+  if (S.open) {
+    const list = (period === 'Wake' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]));
+    html += '<div id="check-body" style="display:flex;flex-direction:column;gap:14px">' +
+      '<div class="grid3" role="group" aria-label="When">' + ['Wake', 'Day', 'Bed'].map((p) =>
+        '<button type="button" class="seg" data-act="period" data-v="' + p + '" aria-pressed="' + (period === p) + '">' + p + '</button>').join('') + '</div><div>' +
+      list.map(([k, l, max]) => {
+        const v = S.scores[k];
+        const set = v !== undefined;
+        return '<div class="scale"><label for="r-' + k + '">' + l + '</label>' +
+          '<input id="r-' + k + '" type="range" min="0" max="' + max + '" step="0.5" value="' + (set ? v : max / 2) + '" data-score="' + k + '"' + (set ? '' : ' class="unset"') + '>' +
+          '<output id="o-' + k + '" for="r-' + k + '"' + (set ? '' : ' class="unset"') + '>' + (set ? v : '–') + '</output></div>';
+      }).join('') + '</div>' +
+      '<input type="text" data-field="checkNote" value="' + esc(S.checkNote) + '" placeholder="Note (optional)" aria-label="Check-in note" autocomplete="off">' +
+      '<button type="button" class="log wide" id="check-save" data-act="checkin"></button></div>';
+  }
+  return html + '</section>';
+}
+
+function render() {
+  const app = $('app');
+  if (S.setup) { app.innerHTML = setupView(); return; }
+  const now = new Date();
+  const today = dayKey(now);
+  const timeLabel = S.time ? (dayKey(S.time) === today ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time) : 'Now · ' + hm(now);
+  const medsChosen = S.meds.length;
+  const rows = recent.filter((r) => r.day === today).slice(0, 5);
+  const waiting = queue.length;
+  app.innerHTML =
+    '<header><div><div class="eyebrow">LIFE HQ</div><h1>Health log</h1></div><div class="head-actions">' +
+      '<button type="button" class="pill' + (S.time ? ' set' : '') + '" data-act="time" aria-expanded="' + S.timeOpen + '" aria-label="Time for the next entry: ' + esc(timeLabel) + '">' +
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>' + esc(timeLabel) + '</button>' +
+      '<button type="button" class="icon-btn" data-act="settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>' +
+    '</div></header>' +
+    (S.timeOpen ? '<div class="time-panel"><label for="time-input" class="small">Time for the next entry</label>' +
+      '<input id="time-input" type="datetime-local" value="' + localInputValue(S.time || now) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '">' +
+      '<div class="btns"><button type="button" class="log" data-act="time-set">Use this time</button><button type="button" class="seg" data-act="time-now">Now</button></div></div>' : '') +
+    trialView() + checkinView() +
+    '<section class="card" aria-label="Bowel"><div class="card-head"><h2>Bowel</h2><button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button></div>' +
+      '<div class="grid7" role="group" aria-label="Bristol type">' + [1, 2, 3, 4, 5, 6, 7].map((n) =>
+        '<button type="button" class="sq" data-act="bristol" data-v="' + n + '" aria-pressed="' + (S.bristol === n) + '" aria-label="Bristol type ' + n + '">' + n + '</button>').join('') + '</div>' +
+      '<div class="grid-size" role="group" aria-label="Size">' + ['Small', 'Medium', 'Large'].map((z) =>
+        '<button type="button" class="seg" data-act="size" data-v="' + z + '" aria-pressed="' + (S.size === z) + '">' + z + '</button>').join('') +
+        '<button type="button" class="seg" data-act="urgent" aria-pressed="' + S.urgent + '">Urgent</button></div>' +
+      '<input type="text" data-field="bowelNote" value="' + esc(S.bowelNote) + '" placeholder="Note (optional)" aria-label="Bowel note" autocomplete="off"></section>' +
+    '<section class="card" aria-label="Medication"><div class="card-head"><h2>Medication</h2><button type="button" class="log" data-act="meds"' + (medsChosen ? '' : ' disabled') + '>' + (medsChosen ? 'Log ' + medsChosen : 'Log') + '</button></div>' +
+      '<div class="chips">' + (cfg.meds || []).map((m) =>
+        '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + (m.strength ? '<small>' + esc(m.strength) + '</small>' : '') + '</button>').join('') +
+        '<button type="button" class="chip other" data-act="other-med">Other…</button></div></section>' +
+    '<section class="card" aria-label="Food"><div class="card-head"><h2>Food</h2><button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button></div>' +
+      '<input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
+      '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div></section>' +
+    (waiting ? '<div class="queue-note"><span>' + waiting + ' waiting to send</span><button type="button" class="link-btn" data-act="flush">Send now</button></div>' : '') +
+    (rows.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + rows.map((r) =>
+      '<div class="row"><span class="t">' + esc(r.hm) + '</span><span>' + esc(r.text) + '</span>' +
+      (r.status === 'pending' ? '<button type="button" class="link-btn" data-act="undo" data-v="' + esc(r.id) + '">Undo</button>' :
+        '<span class="st' + (r.status === 'failed' ? ' bad' : '') + '">' + (r.status === 'saved' ? 'Saved' : r.status === 'failed' ? 'Not saved' : 'Waiting') + '</span>') + '</div>').join('') + '</section>' : '');
+  updateCheckButton();
+}
+
+function localInputValue(d) { return dayKey(d) + 'T' + hm(d); }
+
+function updateCheckButton() {
+  const b = $('check-save');
+  if (!b) return;
+  const n = Object.keys(S.scores).length;
+  b.disabled = !n;
+  b.textContent = n ? 'Save check-in · ' + n + (n === 1 ? ' rating' : ' ratings') : 'Save check-in';
+}
+
+function setupView() {
+  return '<header><div><div class="eyebrow">LIFE HQ</div><h1>Health log</h1></div></header>' +
+    '<form class="setup" id="setup-form"><p>One-off setup. Paste the receiver address and key from the Life HQ Siri Inbox script. They stay on this phone only.</p>' +
+    '<label for="ep">Receiver address (ends /exec)</label><input id="ep" type="url" inputmode="url" autocomplete="off" value="' + esc(LS.get('endpoint', '')) + '" placeholder="https://script.google.com/macros/s/…/exec">' +
+    '<label for="ky">Key</label><input id="ky" type="password" autocomplete="off" value="' + esc(LS.get('key', '')) + '">' +
+    '<button type="submit" class="log wide">Save and test</button>' +
+    (LS.get('endpoint', '') ? '<button type="button" class="seg" data-act="setup-cancel">Back</button>' : '') +
+    '<p class="small">Health records are written straight to your Google health tracker. Nothing is stored on this website.</p></form>';
+}
+
+/* ---------- toast ---------- */
+let toastTimer = null;
+function toast(text, undoId) {
+  $('toast-text').textContent = text;
+  const b = $('toast-btn');
+  b.hidden = !undoId;
+  b.dataset.v = undoId || '';
+  $('toast').hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').hidden = true; }, undoId ? UNDO_MS : 2600);
+}
+
+/* ---------- saving ---------- */
+function saveLocal() { LS.set('recent', recent.slice(0, 40)); LS.set('queue', queue); }
+
+function commit(kind, payload, label, extra) {
+  const when = S.time || new Date();
+  const entry = Object.assign({ kind, entryId: newId(), time: when.toISOString(), timeSet: !!S.time }, payload);
+  recent.unshift(Object.assign({ id: entry.entryId, day: dayKey(when), hm: hm(when), text: label, kind, status: 'pending' }, extra || {}));
+  S.time = null; S.timeOpen = false;
+  saveLocal();
+  pending[entry.entryId] = setTimeout(() => {
+    delete pending[entry.entryId];
+    queue.push(entry);
+    setStatus(entry.entryId, 'waiting');
+    flush();
+  }, UNDO_MS);
+  render();
+  toast('Logging ' + label, entry.entryId);
+}
+
+function undo(id) {
+  if (!pending[id]) return;
+  clearTimeout(pending[id]);
+  delete pending[id];
+  recent = recent.filter((r) => r.id !== id);
+  saveLocal();
+  render();
+  toast('Removed');
+}
+
+function setStatus(id, status, error) {
+  const r = recent.find((x) => x.id === id);
+  if (r) { r.status = status; if (error) r.error = error; }
+  saveLocal();
+  render();
+}
+
+async function post(body) {
+  const endpoint = LS.get('endpoint', '');
+  const key = LS.get('key', '');
+  if (!endpoint || !key) throw new Error('Not set up');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const res = await fetch(endpoint, { method: 'POST', body: JSON.stringify(Object.assign({ key }, body)), redirect: 'follow', signal: ctrl.signal, cache: 'no-store' });
+    return await res.json();
+  } finally { clearTimeout(timer); }
+}
+
+async function flush() {
+  if (sending || !queue.length || !navigator.onLine) { render(); return; }
+  sending = true;
+  let saved = 0, failedMsg = '';
+  try {
+    while (queue.length) {
+      const entry = queue[0];
+      let res;
+      try { res = await post(Object.assign({ action: 'log' }, entry)); } catch (e) { res = null; }
+      if (res && res.success) { queue.shift(); setStatus(entry.entryId, 'saved'); saved++; continue; }
+      if (res && res.permanent) { queue.shift(); setStatus(entry.entryId, 'failed', res.error); failedMsg = res.error || 'Not saved'; continue; }
+      if (res && res.error === 'Not authorised.') { failedMsg = 'Key not accepted. Check settings.'; }
+      break;
+    }
+  } finally { sending = false; saveLocal(); }
+  if (failedMsg) toast(failedMsg);
+  else if (saved && $('toast').hidden) toast('Saved ✓');
+  else if (queue.length && !navigator.onLine) toast('Saved on phone · will send when online');
+  if (saved) refreshConfig();
+  render();
+}
+
+async function refreshConfig(showResult) {
+  try {
+    const res = await post({ action: 'config' });
+    if (res && res.success) {
+      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, today: res.today || FALLBACK.today };
+      LS.set('config', { data: cfg, day: dayKey(new Date()) });
+      if (showResult) toast('Connected ✓');
+      render();
+    } else if (showResult) {
+      toast(res && res.error ? res.error : 'Could not connect');
+    }
+  } catch (e) { if (showResult) toast('Could not reach the receiver'); }
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-act]');
+  if (!el) return;
+  const act = el.dataset.act, v = el.dataset.v;
+  if (act === 'toggle') { S.open = !S.open; if (S.open && !S.period) S.period = guessPeriod(); render(); }
+  else if (act === 'period') { S.period = v; if (v !== 'Wake') { delete S.scores.sleepq; delete S.scores.disturb; } render(); }
+  else if (act === 'bristol') { S.bristol = S.bristol === Number(v) ? null : Number(v); render(); }
+  else if (act === 'size') { S.size = S.size === v ? null : v; render(); }
+  else if (act === 'urgent') { S.urgent = !S.urgent; render(); }
+  else if (act === 'med') { S.meds = S.meds.includes(v) ? S.meds.filter((x) => x !== v) : S.meds.concat(v); render(); }
+  else if (act === 'other-med') { toast('Other medication: use the Siri inbox for now'); }
+  else if (act === 'food-chip') { const f = S.food.trim().replace(/,$/, ''); S.food = f ? f + ', ' + v.toLowerCase() : v; render(); }
+  else if (act === 'time') { S.timeOpen = !S.timeOpen; render(); }
+  else if (act === 'time-now') { S.time = null; S.timeOpen = false; render(); }
+  else if (act === 'time-set') {
+    const val = $('time-input').value;
+    const d = val ? new Date(val) : null;
+    if (d && !isNaN(d) && d.getTime() <= Date.now() + 10 * 60000 && d.getTime() >= Date.now() - 3 * 86400000) { S.time = d; S.timeOpen = false; render(); }
+    else toast('Pick a time in the last 3 days');
+  }
+  else if (act === 'settings') { S.setup = true; render(); }
+  else if (act === 'setup-cancel') { S.setup = false; render(); }
+  else if (act === 'flush') { flush(); }
+  else if (act === 'undo') { undo(v); }
+  else if (act === 'bowel') {
+    if (!S.bristol) return;
+    const label = 'Bristol ' + S.bristol + (S.size ? ' · ' + S.size.toLowerCase() : '') + (S.urgent ? ' · urgent' : '');
+    commit('bowel', { bristol: S.bristol, size: S.size || '', urgent: S.urgent, note: S.bowelNote.trim() }, label);
+    S.bristol = null; S.size = null; S.urgent = false; S.bowelNote = ''; render();
+  }
+  else if (act === 'meds') {
+    if (!S.meds.length) return;
+    const chosen = (cfg.meds || []).filter((m) => S.meds.includes(m.name));
+    commit('meds', { meds: chosen.map((m) => m.name) }, chosen.map((m) => m.name + (m.strength ? ' ' + m.strength : '')).join(', '), { meds: chosen.map((m) => m.name) });
+    S.meds = []; render();
+  }
+  else if (act === 'food') {
+    const food = S.food.trim();
+    if (!food) return;
+    commit('food', { food }, food);
+    S.food = ''; render();
+  }
+  else if (act === 'checkin') {
+    const n = Object.keys(S.scores).length;
+    if (!n) return;
+    const period = S.period || guessPeriod();
+    commit('checkin', { period, scores: Object.assign({}, S.scores), note: S.checkNote.trim() },
+      'Check-in (' + period.toLowerCase() + ') · ' + n + (n === 1 ? ' rating' : ' ratings'), { wake: period === 'Wake' });
+    S.scores = {}; S.checkNote = ''; S.open = false; S.period = null; render();
+  }
+  else if (act === 'trial') {
+    const t = cfg.trial;
+    if (!t) return;
+    commit('trial', {}, t.button.replace(/ now$/i, ''));
+  }
+});
+
+$('toast-btn').addEventListener('click', () => { const id = $('toast-btn').dataset.v; if (id) undo(id); });
+
+document.addEventListener('input', (ev) => {
+  const el = ev.target;
+  if (el.dataset.score) {
+    const k = el.dataset.score;
+    S.scores[k] = Number(el.value);
+    el.classList.remove('unset');
+    const o = $('o-' + k); o.textContent = el.value; o.classList.remove('unset');
+    updateCheckButton();
+  } else if (el.dataset.field) {
+    S[el.dataset.field] = el.value;
+    if (el.dataset.field === 'food') { const b = $('food-log'); if (b) b.disabled = !el.value.trim(); }
+  }
+});
+
+document.addEventListener('submit', async (ev) => {
+  if (ev.target.id !== 'setup-form') return;
+  ev.preventDefault();
+  const ep = $('ep').value.trim(), ky = $('ky').value.trim();
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(ep)) { toast('Address should start https://script.google.com/macros/s/ and end /exec'); return; }
+  if (ky.length < 20) { toast('That key looks too short'); return; }
+  LS.set('endpoint', ep); LS.set('key', ky);
+  S.setup = false; render();
+  refreshConfig(true);
+  flush();
+});
+
+window.addEventListener('online', flush);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); flush(); refreshConfig(); } });
+setInterval(() => { if (!document.hidden) { if (!S.timeOpen && !S.open && document.activeElement.tagName !== 'INPUT') render(); if (queue.length) flush(); } }, 60000);
+
+render();
+if (!S.setup) { flush(); refreshConfig(); }
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
