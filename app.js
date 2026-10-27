@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v5 · 27 Oct';
+const APP_VERSION = 'v6 · 27 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -262,8 +262,28 @@ function guessPeriod() {
 const S = {
   open: false, period: null, scores: {}, checkNote: '', calMed: null,
   bristol: null, size: null, urgent: false, bowelNote: '',
-  meds: [], food: '', time: null, timeOpen: false
+  meds: [], doses: {}, food: '', time: null, timeOpen: false
 };
+
+/* Medicines with several doses ("15 mg / 30 mg"): the first is preselected. */
+const medOptions = (m) => (Array.isArray(m.options) && m.options.length ? m.options : String(m.strength || '').split(/\s*\/\s*/)).filter(Boolean);
+function doseShort(opts) {
+  const plain = opts.map((o) => o.match(/^(\d+(?:\.\d+)?)\s*([a-zµ]+)$/i));
+  if (plain.every((x) => x && x[2] === plain[0][2])) return plain.map((x) => x[1]).join(' / ') + ' ' + plain[0][2];
+  const times = opts.map((o) => o.match(/^(\d+)\s*[×x]\s*(.+)$/));
+  if (times.every((x) => x && x[2] === times[0][2])) {
+    const n = times.map((x) => Number(x[1]));
+    return Math.min.apply(null, n) + '–' + Math.max.apply(null, n) + ' × ' + times[0][2];
+  }
+  return opts.join(' / ');
+}
+function doseMg(dose) {
+  const s = String(dose || '');
+  let m = s.match(/(\d+(?:\.\d+)?)\s*[×x*]\s*(\d+(?:\.\d+)?)\s*mg/i);
+  if (m) return Number(m[1]) * Number(m[2]);
+  m = s.match(/(\d+(?:\.\d+)?)\s*mg/i);
+  return m ? Number(m[1]) : null;
+}
 
 function trialView() {
   const t = cfg.trial;
@@ -290,14 +310,16 @@ function medCounts() {
   if (!h || !Array.isArray(h.meds)) return null;
   const map = {};
   h.meds.forEach((m) => {
-    const byDay = {};
+    const byDay = {}, mg = Array.isArray(m.mg) ? {} : null, unknown = {};
     (m.counts || []).forEach((n, i) => { if (n) byDay[addDays(h.startKey, i)] = n; });
+    if (mg) m.mg.forEach((n, i) => { const k = addDays(h.startKey, i); if (n) mg[k] = n; if ((m.mgUnknown || [])[i]) unknown[k] = true; });
     recent.forEach((r) => {
       if (r.kind === 'meds' && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)) {
         const k = r.hday || r.day; byDay[k] = (byDay[k] || 0) + 1;
+        if (mg) { const n = doseMg((r.doses || {})[m.name]); if (n === null) unknown[k] = true; else mg[k] = (mg[k] || 0) + n; }
       }
     });
-    map[m.name] = { perDay: m.perDay || 1, byDay };
+    map[m.name] = { perDay: m.perDay || 1, byDay, mg, unknown };
   });
   return map;
 }
@@ -335,12 +357,17 @@ function calendarView(name, d, today, cls) {
     if (k < first || k > today) { cells += '<span class="d blank"></span>'; continue; }
     const n = d.byDay[k] || 0;
     const date = keyToDate(k);
-    cells += '<span class="d ' + cls(n, d.perDay, k) + '" title="' + esc(k) + (n ? ': ' + n : '') + '">' + (date.getDate() === 1 ? '<small style="font-size:11px">1 ' + date.toLocaleDateString('en-GB', { month: 'short' }) + '</small>' : date.getDate()) + '</span>';
+    const label = date.getDate() === 1 ? '<small style="font-size:11px">1 ' + date.toLocaleDateString('en-GB', { month: 'short' }) + '</small>' : date.getDate();
+    const amount = d.mg && n ? (d.mg[k] ? d.mg[k] + (d.unknown[k] ? '+' : '') : '?') : '';
+    cells += '<span class="d ' + cls(n, d.perDay, k) + (d.mg ? ' dosed' : '') + '" title="' + esc(k) + (n ? ': ' + n + (amount ? ' · ' + amount + ' mg' : '') : '') + '">' +
+      (d.mg ? '<span>' + label + '</span><i>' + amount + '</i>' : label) + '</span>';
   }
   const count = (days) => Array.from({ length: days }, (_, i) => addDays(today, -i)).filter((k) => (d.byDay[k] || 0) > 0).length;
-  return '<div class="cal"><div class="cal-sum">' + esc(name) + ' · last 7 days ' + count(7) + ' · last 14 ' + count(14) + ' · last 6 weeks ' + count(42) + '</div>' +
+  const week = d.mg ? Array.from({ length: 7 }, (_, i) => addDays(today, -i)).reduce((t, k) => t + (d.mg[k] || 0), 0) : 0;
+  return '<div class="cal"><div class="cal-sum">' + esc(name) + ' · last 7 days ' + count(7) + ' · last 14 ' + count(14) + ' · last 6 weeks ' + count(42) +
+    (d.mg ? ' · 7-day total ' + week + ' mg' : '') + '</div>' +
     '<div class="cal-grid">' + ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((x) => '<span class="dow">' + x + '</span>').join('') + cells + '</div>' +
-    '<div class="cal-sum">Dark = logged' + (d.perDay > 1 ? ' · half = some of ' + d.perDay + ' doses' : '') + ' · before 4am counts as the night before</div></div>';
+    '<div class="cal-sum">Dark = logged' + (d.mg ? ' · small number = mg that day (? = dose not recorded)' : '') + (d.perDay > 1 ? ' · half = some of ' + d.perDay + ' doses' : '') + ' · before 4am counts as the night before</div></div>';
 }
 
 function checkinView() {
@@ -391,19 +418,11 @@ function logRender() {
       '<input id="time-input" type="datetime-local" value="' + localInputValue(S.time || now) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '">' +
       '<div class="btns"><button type="button" class="log" data-act="time-set">Use this time</button><button type="button" class="seg" data-act="time-now">Now</button></div></div>' : '') +
     trialView() + checkinView() +
-    '<section class="card" aria-label="Bowel"><h2>Bowel</h2>' +
-      '<div class="grid7" role="group" aria-label="Bristol type">' + [1, 2, 3, 4, 5, 6, 7].map((n) =>
-        '<button type="button" class="sq" data-act="bristol" data-v="' + n + '" aria-pressed="' + (S.bristol === n) + '" aria-label="Bristol type ' + n + '">' + n + '</button>').join('') + '</div>' +
-      '<div class="grid-size" role="group" aria-label="Size">' + ['Small', 'Medium', 'Large'].map((z) =>
-        '<button type="button" class="seg" data-act="size" data-v="' + z + '" aria-pressed="' + (S.size === z) + '">' + z + '</button>').join('') +
-        '<button type="button" class="seg" data-act="urgent" aria-pressed="' + S.urgent + '">Urgent</button></div>' +
-      '<div class="inline-row"><input type="text" data-field="bowelNote" value="' + esc(S.bowelNote) + '" placeholder="Note (optional)" aria-label="Bowel note" autocomplete="off">' +
-      '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button></div></section>' +
     '<section class="card" aria-label="Medication"><div class="card-head"><h2>Medication</h2><button type="button" class="log" data-act="meds"' + (medsChosen ? '' : ' disabled') + '>' + (medsChosen ? 'Log ' + medsChosen : 'Log') + '</button></div>' +
       '<div class="chips">' + (cfg.meds || []).map((m) =>
-        '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + (m.strength ? '<small>' + esc(m.strength) + '</small>' : '') + '</button>').join('') +
+        '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + chipDose(m) + '</button>').join('') +
         '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' +
-      historyView() + '</section>' +
+      doseRows() + historyView() + '</section>' + bowelView() +
     '<section class="card" aria-label="Food"><h2>Food</h2>' +
       '<div class="inline-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
       '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button></div>' +
@@ -413,8 +432,32 @@ function logRender() {
       '<div class="lrow"><span class="t">' + esc(r.hm) + '</span><span>' + esc(r.text) + '</span>' +
       (r.status === 'pending' ? '<button type="button" class="link-btn" data-act="undo" data-v="' + esc(r.id) + '">Undo</button>' :
         '<span class="st' + (r.status === 'failed' ? ' bad' : '') + '">' + (r.status === 'saved' ? 'Saved' : r.status === 'failed' ? 'Not saved' : 'Waiting') + '</span>') + '</div>').join('') + '</section>' : '') +
-    '<p class="small" style="text-align:center;margin:8px 0 0">Life HQ ' + APP_VERSION + '</p>';
+    '';
   updateCheckButton();
+}
+
+function chipDose(m) {
+  const opts = medOptions(m);
+  if (opts.length < 2) return m.strength ? '<small>' + esc(m.strength) + '</small>' : '';
+  return '<small>' + esc(S.meds.includes(m.name) && S.doses[m.name] ? S.doses[m.name] : doseShort(opts)) + '</small>';
+}
+
+function doseRows() {
+  const rows = (cfg.meds || []).filter((m) => S.meds.includes(m.name) && medOptions(m).length > 1);
+  return rows.map((m) => '<div class="dose-row" role="group" aria-label="' + esc(m.name) + ' dose"><span>' + esc(m.name) + '</span>' +
+    medOptions(m).map((o) => '<button type="button" class="seg" data-act="dose" data-v="' + esc(m.name) + '" data-dose="' + esc(o) + '" aria-pressed="' + (S.doses[m.name] === o) + '">' + esc(o) + '</button>').join('') + '</div>').join('');
+}
+
+function bowelView() {
+  return '<section class="card bowel" aria-label="Bowel"><div class="card-head"><h2>Bowel</h2>' +
+      '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button></div>' +
+    '<div class="grid7" role="group" aria-label="Bristol type">' + [1, 2, 3, 4, 5, 6, 7].map((n) =>
+      '<button type="button" class="sq" data-act="bristol" data-v="' + n + '" aria-pressed="' + (S.bristol === n) + '" aria-label="Bristol type ' + n + '">' + n + '</button>').join('') + '</div>' +
+    (S.bristol ? '<div class="grid-size" role="group" aria-label="Size">' + ['Small', 'Medium', 'Large'].map((z) =>
+      '<button type="button" class="seg" data-act="size" data-v="' + z + '" aria-pressed="' + (S.size === z) + '">' + z + '</button>').join('') +
+      '<button type="button" class="seg" data-act="urgent" aria-pressed="' + S.urgent + '">Urgent</button></div>' +
+      '<input type="text" data-field="bowelNote" value="' + esc(S.bowelNote) + '" placeholder="Note (optional)" aria-label="Bowel note" autocomplete="off">' : '') +
+    '</section>';
 }
 
 function localInputValue(d) { return dayKey(d) + 'T' + hm(d); }
@@ -504,7 +547,17 @@ function logAct(el) {
   else if (act === 'bristol') { S.bristol = S.bristol === Number(v) ? null : Number(v); logRender(); }
   else if (act === 'size') { S.size = S.size === v ? null : v; logRender(); }
   else if (act === 'urgent') { S.urgent = !S.urgent; logRender(); }
-  else if (act === 'med') { S.meds = S.meds.includes(v) ? S.meds.filter((x) => x !== v) : S.meds.concat(v); logRender(); }
+  else if (act === 'med') {
+    if (S.meds.includes(v)) { S.meds = S.meds.filter((x) => x !== v); delete S.doses[v]; }
+    else {
+      S.meds = S.meds.concat(v);
+      const m = (cfg.meds || []).find((x) => x.name === v);
+      const opts = m ? medOptions(m) : [];
+      if (opts.length > 1) S.doses[v] = opts[0];
+    }
+    logRender();
+  }
+  else if (act === 'dose') { S.doses[v] = el.dataset.dose; logRender(); }
   else if (act === 'cal') { S.calMed = S.calMed === v ? null : v; logRender(); }
   else if (act === 'other-med') { toast('Other medication: use the Siri inbox for now'); }
   else if (act === 'food-chip') { const f = S.food.trim().replace(/,$/, ''); S.food = f ? f + ', ' + v.toLowerCase() : v; logRender(); }
@@ -529,8 +582,14 @@ function logAct(el) {
   else if (act === 'meds') {
     if (!S.meds.length) return;
     const chosen = (cfg.meds || []).filter((m) => S.meds.includes(m.name));
-    commit('meds', { meds: chosen.map((m) => m.name) }, chosen.map((m) => m.name + (m.strength ? ' ' + m.strength : '')).join(', '), { meds: chosen.map((m) => m.name) });
-    S.meds = []; logRender();
+    // Dose choices need the v5 HealthLog script (it sends "options"); older ones would record the wrong dose.
+    const stale = chosen.find((m) => medOptions(m).length > 1 && !Array.isArray(m.options));
+    if (stale) { toast(stale.name + ' needs the updated HealthLog script before it can be logged.'); return; }
+    const doses = {};
+    chosen.forEach((m) => { if (medOptions(m).length > 1) doses[m.name] = S.doses[m.name] || medOptions(m)[0]; });
+    const label = chosen.map((m) => m.name + (doses[m.name] ? ' ' + doses[m.name] : m.strength ? ' ' + m.strength : '')).join(', ');
+    commit('meds', { meds: chosen.map((m) => m.name), doses }, label, { meds: chosen.map((m) => m.name), doses });
+    S.meds = []; S.doses = {}; logRender();
   }
   else if (act === 'food') {
     const food = S.food.trim();
@@ -622,7 +681,7 @@ function todayMarkup() {
         '<a href="https://docs.google.com/spreadsheets/d/1Ol5M26V3L-Bt-d_MIPrL6o6es7f2o28l28lhtaRUsgU/edit" target="_blank" rel="noopener">Inventory</a></div>' +
         '<button id="test-celebration" type="button">Test celebration</button></nav>' +
       '<div id="recent-logs" aria-live="polite" hidden></div><div id="medications" aria-live="polite" hidden></div></section>' +
-    '<p class="small" style="text-align:center;margin:8px 0 0">Life HQ ' + APP_VERSION + '</p></div>';
+    '</div>';
 }
 
 function buildToday() {
@@ -667,7 +726,12 @@ function refreshToday() {
   BOTTOM_PANELS.forEach(([, panel]) => { if (!$(panel).hidden) openPanel(panel); });
 }
 
-function message(text) { $('message').textContent = text; }
+let messageTimer = null;
+function message(text, clearAfter) {
+  $('message').textContent = text;
+  clearTimeout(messageTimer);
+  if (clearAfter) messageTimer = setTimeout(() => { if ($('message').textContent === text) $('message').textContent = ''; }, clearAfter);
+}
 
 function londonWorkingDay(minutes) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
@@ -804,7 +868,7 @@ async function completeTodoist(id, check, row, after) {
     renderTasks();
     if (after) after();
     if (!$('next-days').hidden && after !== loadNextFewDays) loadNextFewDays();
-    message('Completed in Todoist.');
+    message('Completed in Todoist.', 5000);
     try { celebrateCompletion(); } catch (e) {}
   } catch (e) {
     T.completing.delete(id);
@@ -1125,23 +1189,42 @@ function prepareCompletionAudio() {
     return completionAudio.state === 'suspended' ? completionAudio.resume().catch(() => {}) : Promise.resolve();
   } catch (e) { return Promise.resolve(); }
 }
+/* Reward sounds: the original bell arpeggio plus a few cousins, never the same one twice in a row. */
+const SOUNDS = [
+  { name: 'bells', type: 'sine', echo: true, step: 0.065, notes: [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98, 2093, 2637] },
+  { name: 'bells', type: 'sine', echo: true, step: 0.065, notes: [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98, 2093, 2637] },
+  { name: 'pentatonic', type: 'triangle', echo: true, step: 0.055, notes: [587.33, 659.25, 783.99, 880, 1174.66, 1318.51, 1567.98, 1760] },
+  { name: 'marimba', type: 'triangle', echo: false, step: 0.09, decay: 0.25, notes: [783.99, 659.25, 523.25, 783.99, 1046.5, 1567.98] },
+  { name: 'bloom', type: 'sine', echo: true, step: 0.018, decay: 0.9, notes: [523.25, 659.25, 783.99, 987.77, 1318.51, 1975.53] },
+  { name: 'glass', type: 'sine', echo: true, step: 0.16, decay: 0.7, harmonics: true, notes: [1318.51, 1975.53, 2637] },
+  { name: 'tumble', type: 'sine', echo: true, step: 0.06, notes: [2093, 1567.98, 1318.51, 1046.5, 1318.51, 1567.98, 2093, 2637] }
+];
+let lastSound = -1;
 function completionPop() {
   if (!completionAudio || completionAudio.state !== 'running') return;
   try {
+    let pick;
+    do { pick = Math.floor(Math.random() * SOUNDS.length); } while (SOUNDS.length > 1 && SOUNDS[pick].name === (SOUNDS[lastSound] || {}).name);
+    lastSound = pick;
+    const sound = SOUNDS[pick];
     const audio = completionAudio;
     const start = audio.currentTime + 0.015;
-    [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98, 2093, 2637].forEach((frequency, index) => {
-      const time = start + index * 0.065;
-      [0, 0.12].forEach((echo, repeat) => {
-        const osc = audio.createOscillator(), gain = audio.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(frequency, time + echo);
-        gain.gain.setValueAtTime(0.0001, time + echo);
-        gain.gain.exponentialRampToValueAtTime(repeat ? 0.022 : 0.105, time + echo + 0.006);
-        gain.gain.exponentialRampToValueAtTime(0.0001, time + echo + 0.48);
-        osc.connect(gain); gain.connect(audio.destination);
-        osc.onended = () => { osc.disconnect(); gain.disconnect(); };
-        osc.start(time + echo); osc.stop(time + echo + 0.5);
+    const decay = sound.decay || 0.48;
+    sound.notes.forEach((frequency, index) => {
+      const time = start + index * sound.step;
+      const layers = sound.harmonics ? [[1, 1], [2.76, 0.25], [5.4, 0.08]] : [[1, 1]];
+      (sound.echo ? [0, 0.12] : [0]).forEach((echo, repeat) => {
+        layers.forEach(([mult, level]) => {
+          const osc = audio.createOscillator(), gain = audio.createGain();
+          osc.type = sound.type;
+          osc.frequency.setValueAtTime(frequency * mult, time + echo);
+          gain.gain.setValueAtTime(0.0001, time + echo);
+          gain.gain.exponentialRampToValueAtTime((repeat ? 0.022 : 0.105) * level, time + echo + 0.006);
+          gain.gain.exponentialRampToValueAtTime(0.0001, time + echo + decay);
+          osc.connect(gain); gain.connect(audio.destination);
+          osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+          osc.start(time + echo); osc.stop(time + echo + decay + 0.02);
+        });
       });
     });
   } catch (e) {}

@@ -80,7 +80,7 @@ a{color:inherit}
 .chip.other{border-style:dashed;border-color:var(--faint);color:var(--muted)}
 .grid7{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
 .grid-size{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 84px;gap:6px}
-.sq{min-height:44px;border-radius:10px;font-size:18px;font-weight:650;border:1px solid var(--line);background:var(--card)}
+.sq{min-height:40px;border-radius:10px;font-size:18px;font-weight:650;border:1px solid var(--line);background:var(--card)}
 .trial{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:12px;background:var(--soft)}
 .trial-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12px;letter-spacing:.06em;color:var(--muted)}
 .trial-name{font-size:16px;font-weight:650}
@@ -252,3 +252,12 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
 @keyframes reward-pop{from{opacity:0;transform:scale(.55) rotate(-7deg)}to{opacity:1;transform:scale(1) rotate(0)}}
 @keyframes reward-spark{from{opacity:1;transform:translate(-50%,-50%) scale(.4)}to{opacity:0;transform:translate(calc(-50% + var(--x)),calc(-50% + var(--y))) rotate(var(--r)) scale(1)}}
 @media(prefers-reduced-motion:reduce){.reward-card{animation:none}.reward-spark{display:none}}
+
+/* v6: dose choice, dosed calendar cells, compact bowel */
+.dose-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dose-row span{font-size:14px;font-weight:600;min-width:96px}
+.dose-row .seg{min-height:40px;padding:0 12px;font-size:14px}
+.cal-grid .d.dosed{height:42px;flex-direction:column;gap:0;line-height:1.1}
+.cal-grid .d.dosed i{font-style:normal;font-size:10px;opacity:.85;min-height:11px}
+.bowel{gap:8px}
+.bowel .grid7{gap:5px}
