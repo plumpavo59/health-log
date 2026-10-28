@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v15 · 28 Oct';
+const APP_VERSION = 'v16 · 28 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -29,6 +29,15 @@ const LS = {
   set(k, v) { try { localStorage.setItem('hl.' + k, JSON.stringify(v)); } catch (e) {} },
   del(k) { try { localStorage.removeItem('hl.' + k); } catch (e) {} }
 };
+
+/* Refresh buttons spin while their load runs (at least 600 ms so a quick load still shows). */
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+async function spin(btn, work) {
+  if (!btn || btn.getAttribute('aria-busy') === 'true') return;
+  btn.setAttribute('aria-busy', 'true'); btn.classList.add('busy');
+  try { await Promise.all([Promise.resolve().then(work).catch(() => {}), sleepMs(600)]); }
+  finally { btn.removeAttribute('aria-busy'); btn.classList.remove('busy'); }
+}
 
 /* ================= theme ================= */
 const darkQuery = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
@@ -277,8 +286,13 @@ function guessPeriod() {
 const S = {
   open: false, period: null, scores: {}, checkNote: '', calMed: null,
   bristol: null, size: null, urgent: false, bowelNote: '',
-  meds: [], doses: {}, food: '', time: null, timeOpen: false
+  meds: [], doses: {}, food: '', time: null, timeOpen: false,
+  sheet: null, sheetFresh: false, refreshing: false, inboxText: '', inboxStatus: '',
+  actText: '', actType: null, actMin: null, actEffort: null
 };
+const ACT_TYPES = ['Walk', 'Dance', 'Aerial', 'Cycle', 'Carrying/lifting', 'Other'];
+const ACT_MINS = [10, 20, 30, 45, 60, 90, 120];
+const ACT_EFFORT = ['Easy', 'Moderate', 'Hard'];
 
 /* Medicines with several doses ("15 mg / 30 mg"): the first is preselected. */
 /* Strengths are separated by " / " with spaces, so "15/500 mg / 30/500 mg" gives two. */
@@ -394,10 +408,12 @@ function calendarView(name, d, today, cls) {
 function checkinView() {
   const period = S.period || guessPeriod();
   const last = cfg.today.lastCheckin ? 'Last: ' + cfg.today.lastCheckin.toLowerCase() : 'None yet today';
-  let html = '<section class="card" aria-label="Check-in">' +
+  const flared = flareToday();
+  let html = '<section class="card" aria-label="Check-in"><div class="check-row">' +
     '<button type="button" class="check-toggle" data-act="toggle" aria-expanded="' + S.open + '" aria-controls="check-body">' +
     '<span aria-hidden="true"></span><span><h2>Check-in</h2><span class="sub">' + (S.open ? 'Leave anything blank you didn’t notice' : esc(last) + ' · tap to open') + '</span></span>' +
-    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>';
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>' +
+    '<button type="button" class="flare-btn" data-act="flare" aria-pressed="' + !!flared + '" aria-label="' + (flared ? 'Flare marked today at ' + esc(flared) : 'Mark today as a flare') + '">' + (flared ? 'Flare ✓' : 'Flare') + '</button></div>';
   if (S.open) {
     const list = (period === 'Wake' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]));
     html += '<div id="check-body" style="display:flex;flex-direction:column;gap:14px">' +
@@ -418,10 +434,11 @@ function checkinView() {
 
 function logRender() {
   if (view !== 'log') return;
-  if (!$('log-main')) { $('log-view').innerHTML = '<div id="log-main"></div><div id="log-more" class="log-more"></div>'; }
+  if (!$('log-main')) { $('log-view').innerHTML = '<input id="focus-proxy" class="focus-proxy" type="text" aria-hidden="true" tabindex="-1"><div id="log-main"></div><div id="log-more" class="log-more"></div>'; }
   const app = $('log-main');
   const head = (actions) => '<div class="top"><span class="eyebrow">LIFE HQ</span><div class="top-actions">' + actions +
-    '<button type="button" class="icon-btn" data-act="settings" aria-label="Settings">' + GEAR + '</button></div></div><h1 class="page-title">Health log</h1>';
+    (Conn.canLog() ? '<button type="button" class="icon-btn' + (S.refreshing ? ' busy' : '') + '" data-act="refresh" aria-label="Refresh"' + (S.refreshing ? ' aria-busy="true"' : '') + '>' + REFRESH_SVG + '</button>' : '') +
+    '<button type="button" class="icon-btn" data-act="settings" aria-label="Settings">' + GEAR + '</button></div></div><h1 class="page-title">Log</h1>';
   if (!Conn.canLog()) {
     app.innerHTML = head('') + '<div class="notice">Pair this icon once to start logging. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
       '<button type="button" class="log wide" data-act="pair">Pair this icon</button></div>';
@@ -439,24 +456,147 @@ function logRender() {
     (S.timeOpen ? '<div class="time-panel"><label for="time-input" class="small">Time for the next entry</label>' +
       '<input id="time-input" type="datetime-local" value="' + localInputValue(S.time || now) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '">' +
       '<div class="btns"><button type="button" class="log" data-act="time-set">Use this time</button><button type="button" class="seg" data-act="time-now">Now</button></div></div>' : '') +
-    trialView() + checkinView() +
-    '<section class="card" aria-label="Medication"><div class="card-head"><h2>Medication</h2><button type="button" class="log" data-act="meds"' + (medsChosen ? '' : ' disabled') + '>' + (medsChosen ? 'Log ' + medsChosen : 'Log') + '</button></div>' +
-      '<div class="chips">' + (cfg.meds || []).map((m) =>
-        '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + chipDose(m) + takenMark(m) + '</button>').join('') +
-        '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' +
-
-      doseRows() + historyView() + '</section>' + bowelView() +
-    '<section class="card" aria-label="Food"><h2>Food</h2>' +
-      '<div class="inline-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
-      '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button></div>' +
-      '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div></section>' +
+    trialView() + logInboxView() + checkinView() + quickView() +
     (waiting ? '<div class="queue-note"><span>' + waiting + ' waiting to send</span><button type="button" class="link-btn" data-act="flush">Send now</button></div>' : '') +
     (rows.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + rows.map((r) =>
       '<div class="lrow"><span class="t">' + esc(r.hm) + '</span><span>' + esc(r.text) + '</span>' +
       (r.status === 'pending' ? '<button type="button" class="link-btn" data-act="undo" data-v="' + esc(r.id) + '">Undo</button>' :
         '<span class="st' + (r.status === 'failed' ? ' bad' : '') + '">' + (r.status === 'saved' ? 'Saved' : r.status === 'failed' ? 'Not saved' : 'Waiting') + '</span>') + '</div>').join('') + '</section>' : '') +
-    '';
+    sheetView();
+  S.sheetFresh = false;
+  document.body.classList.toggle('sheet-open', !!S.sheet);
   updateCheckButton();
+}
+
+/* ---------- Log page: one-line inbox (same queue and sender as Today's inbox) ---------- */
+function logInboxView() {
+  if (!Conn.paired()) return '';
+  return '<form id="log-inbox-form" class="mini-inbox" autocomplete="off"><input type="text" id="log-inbox-text" data-field="inboxText" value="' + esc(S.inboxText) +
+    '" placeholder="Add to inbox…" aria-label="Add to inbox" enterkeyhint="send" maxlength="2000"><button type="submit" class="log">Send</button></form>' +
+    '<div id="log-inbox-status" class="mini-status" role="status" aria-live="polite">' + esc(S.inboxStatus || (inboxQueue.length ? 'Waiting to send (' + inboxQueue.length + ')' : '')) + '</div>';
+}
+function setLogInboxStatus(text, clearAfter) {
+  S.inboxStatus = text;
+  const el = $('log-inbox-status'); if (el) el.textContent = text;
+  if (clearAfter) setTimeout(() => { if (S.inboxStatus === text) setLogInboxStatus(''); }, clearAfter);
+}
+function logInboxSubmit() {
+  const text = (S.inboxText || '').trim();
+  if (!text) return;
+  queueInbox(text, 'log');
+  S.inboxText = '';
+  const el = $('log-inbox-text'); if (el) el.value = '';
+  setLogInboxStatus(navigator.onLine ? 'Sending…' : 'Waiting to send');
+  inboxFlush(true);
+}
+
+/* ---------- quick-log buttons: each opens a bottom sheet ---------- */
+const QI = (d) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+const QUICK = [
+  ['meds', 'Medication', QI('<rect x="2.5" y="8.5" width="19" height="7" rx="3.5" transform="rotate(-40 12 12)"/><path d="m9.6 9.2 4.8 5.6"/>')],
+  ['bowel', 'Bowel', QI('<path d="M12 3.5s5.5 6 5.5 10.2a5.5 5.5 0 0 1-11 0C6.5 9.5 12 3.5 12 3.5z"/>')],
+  ['food', 'Food', QI('<path d="M7 3v7m-2.5-7v4.5a2.5 2.5 0 0 0 5 0V3M7 10v11M17 21V3c-2 1-3.5 3.5-3.5 7v3H17"/>')],
+  ['activity', 'Activity', QI('<circle cx="13.5" cy="4.5" r="1.8"/><path d="m8 21 3-6 3 2.5V21M11 15l1.2-5.5L16 12l3-1M12.2 9.5 8.5 10.5 7 13.5"/>')]
+];
+const X_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+function quickCount(kind) {
+  const hk = healthKey(new Date());
+  if (kind === 'meds') {
+    const n = (cfg.meds || []).filter((m) => takenMark(m)).length;
+    return n ? n + ' today' : '';
+  }
+  const k = kind === 'food' ? 'food' : kind;
+  const rows = recent.filter((r) => r.kind === k && r.hday === hk && r.status !== 'failed');
+  if (kind === 'activity') { const mins = rows.reduce((t, r) => t + (r.minutes || 0), 0); return mins ? mins + ' min' : rows.length ? rows.length + ' today' : ''; }
+  return rows.length ? rows.length + ' today' : '';
+}
+function quickView() {
+  return '<div class="quick4" role="group" aria-label="Quick log">' + QUICK.map(([k, label, icon]) => {
+    const c = quickCount(k);
+    return '<button type="button" class="quick" data-act="sheet" data-v="' + k + '" aria-haspopup="dialog">' + icon + '<span>' + label + '</span>' +
+      (c ? '<small>' + esc(c) + '</small>' : '') + '</button>';
+  }).join('') + '</div>';
+}
+function sheetView() {
+  if (!S.sheet || !Conn.canLog()) return '';
+  const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity' }[S.sheet];
+  let body = '', btn = '';
+  if (S.sheet === 'meds') {
+    const n = S.meds.length;
+    btn = '<button type="button" class="log" data-act="meds"' + (n ? '' : ' disabled') + '>' + (n ? 'Log ' + n : 'Log') + '</button>';
+    body = '<div class="chips">' + (cfg.meds || []).map((m) =>
+      '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + chipDose(m) + takenMark(m) + '</button>').join('') +
+      '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' + doseRows() + historyView();
+  } else if (S.sheet === 'bowel') {
+    btn = '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button>';
+    body = bowelBody();
+  } else if (S.sheet === 'food') {
+    btn = '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button>';
+    body = '<input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
+      '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div>';
+  } else if (S.sheet === 'activity') {
+    btn = '<button type="button" class="log" id="act-log" data-act="activity"' + (actRoute() ? '' : ' disabled') + '>' + (actRoute() === 'inbox' ? 'Send to inbox' : 'Log') + '</button>';
+    const chips = (act, list, cur, fmt) => '<div class="chips">' + list.map((x) => '<button type="button" class="chip food" data-act="' + act + '" data-v="' + esc(x) + '" aria-pressed="' + (cur === x) + '">' + esc(fmt ? fmt(x) : x) + '</button>').join('') + '</div>';
+    body = '<input type="text" id="act-input" data-field="actText" value="' + esc(S.actText) + '" placeholder="What did you do?" aria-label="What did you do" autocomplete="off" enterkeyhint="done">' +
+      '<div class="opt-h">Type</div>' + chips('act-type', ACT_TYPES, S.actType) +
+      '<div class="opt-h">Minutes</div>' + chips('act-min', ACT_MINS.map(String), S.actMin === null ? null : String(S.actMin), (x) => (x === '120' ? '120+' : x)) +
+      '<div class="opt-h">Effort</div><div class="grid3" role="group" aria-label="Effort">' + ACT_EFFORT.map((e) => '<button type="button" class="seg" data-act="act-effort" data-v="' + e + '" aria-pressed="' + (S.actEffort === e) + '">' + e + '</button>').join('') + '</div>' +
+      '<p class="small" id="act-hint">' + actHint() + '</p>';
+  }
+  const when = S.time ? '<p class="small sheet-when">Will log at ' + esc((dayKey(S.time) === dayKey(new Date()) ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time)) + ' (time set at the top)</p>' : '';
+  return '<div class="sheet-backdrop' + (S.sheetFresh ? ' fresh' : '') + '" data-act="sheet-close"></div>' +
+    '<div class="sheet' + (S.sheetFresh ? ' fresh' : '') + '" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">' +
+    '<div class="sheet-grab" aria-hidden="true"></div><div class="sheet-head"><h2 id="sheet-title">' + title + '</h2>' + btn +
+    '<button type="button" class="icon-btn sheet-x" data-act="sheet-close" aria-label="Close">' + X_SVG + '</button></div>' + when + body + '</div>';
+}
+/* Type + minutes → straight to Events; text only → the inbox ("Activity: …") for the processor to sort. */
+function actRoute() { return S.actType && S.actMin ? 'log' : S.actText.trim() ? 'inbox' : ''; }
+function actHint() {
+  const r = actRoute();
+  return r === 'log' ? 'Saves straight to your health log.' : r === 'inbox' ? 'Pick a type and minutes to save it directly, or send the text to the inbox to be sorted.' : 'Pick a type and minutes, or just describe it.';
+}
+function updateActButton() {
+  const b = $('act-log'); if (!b) return;
+  b.disabled = !actRoute(); b.textContent = actRoute() === 'inbox' ? 'Send to inbox' : 'Log';
+  const h = $('act-hint'); if (h) h.textContent = actHint();
+}
+/* iPhone only shows the keyboard if focus happens inside the tap itself, so focus a hidden input
+   first, rebuild the page with the sheet, then move focus to the real field. */
+function openSheet(kind) {
+  const field = kind === 'food' ? 'food-input' : kind === 'activity' ? 'act-input' : null;
+  if (field) { const proxy = $('focus-proxy'); if (proxy) proxy.focus(); }
+  S.sheet = kind; S.sheetFresh = true;
+  logRender();
+  if (field && $(field)) $(field).focus();
+}
+function closeSheet() {
+  if (!S.sheet) return;
+  S.sheet = null;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  logRender();
+}
+let sheetDrag = null;
+document.addEventListener('touchstart', (e) => {
+  const sh = e.target.closest && e.target.closest('#sheet');
+  if (!sh || sh.scrollTop > 0 || e.target.closest('input')) return;
+  sheetDrag = { y: e.touches[0].clientY, dy: 0, el: sh };
+}, { passive: true });
+document.addEventListener('touchmove', (e) => {
+  if (!sheetDrag) return;
+  sheetDrag.dy = e.touches[0].clientY - sheetDrag.y;
+  if (sheetDrag.dy > 0) sheetDrag.el.style.transform = 'translateY(' + sheetDrag.dy + 'px)';
+}, { passive: true });
+document.addEventListener('touchend', () => {
+  if (!sheetDrag) return;
+  const d = sheetDrag; sheetDrag = null;
+  if (d.dy > 90) closeSheet(); else d.el.style.transform = '';
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.sheet) closeSheet(); });
+/* Flare: one tap logs "Flare" for today (Symptom update). Shown on the Health calendar. */
+function flareToday() {
+  const hk = healthKey(new Date());
+  const local = recent.find((r) => r.kind === 'flare' && r.hday === hk && r.status !== 'failed');
+  return (cfg.today && cfg.today.flare) || (local ? local.hm : '');
 }
 
 /* Logged today (this health day, 4am cut-off): ✓ when done, "1/2" part-way for twice-daily medicines. */
@@ -493,16 +633,13 @@ function doseRows() {
   }).join('');
 }
 
-function bowelView() {
-  return '<section class="card bowel" aria-label="Bowel"><div class="card-head"><h2>Bowel</h2>' +
-      '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button></div>' +
-    '<div class="grid7" role="group" aria-label="Bristol type">' + [1, 2, 3, 4, 5, 6, 7].map((n) =>
+function bowelBody() {
+  return '<div class="grid7" role="group" aria-label="Bristol type">' + [1, 2, 3, 4, 5, 6, 7].map((n) =>
       '<button type="button" class="sq" data-act="bristol" data-v="' + n + '" aria-pressed="' + (S.bristol === n) + '" aria-label="Bristol type ' + n + '">' + n + '</button>').join('') + '</div>' +
     (S.bristol ? '<div class="grid-size" role="group" aria-label="Size">' + ['Small', 'Medium', 'Large'].map((z) =>
       '<button type="button" class="seg" data-act="size" data-v="' + z + '" aria-pressed="' + (S.size === z) + '">' + z + '</button>').join('') +
       '<button type="button" class="seg" data-act="urgent" aria-pressed="' + S.urgent + '">Urgent</button></div>' +
-      '<input type="text" data-field="bowelNote" value="' + esc(S.bowelNote) + '" placeholder="Note (optional)" aria-label="Bowel note" autocomplete="off">' : '') +
-    '</section>';
+      '<input type="text" data-field="bowelNote" value="' + esc(S.bowelNote) + '" placeholder="Note (optional)" aria-label="Bowel note" autocomplete="off">' : '');
 }
 
 function logMoreRender() {
@@ -606,6 +743,11 @@ async function logRefreshConfig() {
     const res = await api({ action: 'config' });
     if (res && res.success) {
       cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, today: res.today || FALLBACK.today };
+      if (S.sheet && document.activeElement && /INPUT/.test(document.activeElement.tagName) && document.activeElement.closest('#sheet')) {
+        LS.set('config', { data: cfg, day: dayKey(new Date()) });   // don't rebuild a sheet while typing in it
+        if (view === 'trends') trendsRender();
+        return true;
+      }
       LS.set('config', { data: cfg, day: dayKey(new Date()) });
       logRender();
       if (view === 'trends') trendsRender();
@@ -617,6 +759,37 @@ async function logRefreshConfig() {
 
 function logAct(el) {
   const act = el.dataset.act, v = el.dataset.v;
+  if (act === 'sheet') { openSheet(v); return; }
+  if (act === 'sheet-close') { closeSheet(); return; }
+  if (act === 'refresh') {
+    if (S.refreshing) return;
+    S.refreshing = true; logRender();
+    Promise.all([logRefreshConfig(), sleepMs(600)]).then(([ok]) => { S.refreshing = false; logRender(); if (!ok) toast('Couldn’t refresh (offline?)'); logFlush(); });
+    return;
+  }
+  if (act === 'act-type') { S.actType = S.actType === v ? null : v; logRender(); return; }
+  if (act === 'act-min') { S.actMin = S.actMin === Number(v) ? null : Number(v); logRender(); return; }
+  if (act === 'act-effort') { S.actEffort = S.actEffort === v ? null : v; logRender(); return; }
+  if (act === 'activity') {
+    const route = actRoute();
+    const text = S.actText.trim();
+    if (route === 'log') {
+      const label = S.actType + ' · ' + (S.actMin >= 120 ? '120+' : S.actMin) + ' min' + (S.actEffort ? ' · ' + S.actEffort.toLowerCase() : '') + (text ? ' · ' + text : '');
+      commit('activity', { type: S.actType, minutes: S.actMin, effort: S.actEffort || '', text }, label, { minutes: S.actMin });
+    } else if (route === 'inbox') {
+      queueInbox('Activity: ' + text + (S.actType ? ' (' + S.actType.toLowerCase() + ')' : '') + (S.actMin ? ', ' + S.actMin + ' min' : '') + (S.actEffort ? ', ' + S.actEffort.toLowerCase() : ''), 'log');
+      setLogInboxStatus(navigator.onLine ? 'Sending…' : 'Waiting to send');
+      inboxFlush(true);
+      toast('Sent to inbox: ' + text);
+    } else return;
+    S.actText = ''; S.actType = null; S.actMin = null; S.actEffort = null; closeSheet();
+    return;
+  }
+  if (act === 'flare') {
+    if (flareToday()) { toast('Today is already marked as a flare.'); return; }
+    commit('flare', {}, 'Flare');
+    return;
+  }
   if (act === 'toggle') { S.open = !S.open; if (S.open && !S.period) S.period = guessPeriod(); logRender(); }
   else if (act === 'period') { S.period = v; if (v !== 'Wake') { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
   else if (act === 'bristol') { S.bristol = S.bristol === Number(v) ? null : Number(v); logRender(); }
@@ -655,7 +828,7 @@ function logAct(el) {
     if (!S.bristol) return;
     const label = 'Bristol ' + S.bristol + (S.size ? ' · ' + S.size.toLowerCase() : '') + (S.urgent ? ' · urgent' : '');
     commit('bowel', { bristol: S.bristol, size: S.size || '', urgent: S.urgent, note: S.bowelNote.trim() }, label);
-    S.bristol = null; S.size = null; S.urgent = false; S.bowelNote = ''; logRender();
+    S.bristol = null; S.size = null; S.urgent = false; S.bowelNote = ''; closeSheet();
   }
   else if (act === 'meds') {
     if (!S.meds.length) return;
@@ -667,13 +840,13 @@ function logAct(el) {
     chosen.forEach((m) => { if (isDosed(m)) doses[m.name] = doseText(m); });
     const label = chosen.map((m) => m.name + (doses[m.name] ? ' ' + doses[m.name] : m.strength ? ' ' + m.strength : '')).join(', ');
     commit('meds', { meds: chosen.map((m) => m.name), doses }, label, { meds: chosen.map((m) => m.name), doses });
-    S.meds = []; S.doses = {}; logRender();
+    S.meds = []; S.doses = {}; closeSheet();
   }
   else if (act === 'food') {
     const food = S.food.trim();
     if (!food) return;
     commit('food', { food }, food);
-    S.food = ''; logRender();
+    S.food = ''; closeSheet();
   }
   else if (act === 'checkin') {
     const n = Object.keys(S.scores).length;
@@ -709,6 +882,7 @@ document.addEventListener('input', (ev) => {
   } else if (el.dataset.field) {
     S[el.dataset.field] = el.value;
     if (el.dataset.field === 'food') { const b = $('food-log'); if (b) b.disabled = !el.value.trim(); }
+    if (el.dataset.field === 'actText') updateActButton();
   }
 });
 
@@ -759,7 +933,7 @@ function buildToday() {
   T.built = true;
   $('today-settings').onclick = () => openSettings();
   $('pair-today').onclick = () => openSettings('pair');
-  $('refresh').onclick = () => { refreshToday(); };
+  $('refresh').onclick = () => spin($('refresh'), refreshToday);
   $('toggle').onclick = () => {
     const showing = $('optional').hidden;
     $('optional').hidden = !showing;
@@ -799,9 +973,7 @@ function todayEnter() {
 
 function refreshToday() {
   T.lastLoad = 0;
-  loadDay(false);
-  if (!$('recent-logs').hidden) loadRecentLogs();
-  inboxFlush();
+  return Promise.all([loadDay(false), $('recent-logs').hidden ? null : loadRecentLogs(), inboxFlush()]);
 }
 
 let messageTimer = null;
@@ -1034,12 +1206,16 @@ function renderInboxQueue() {
   el.innerHTML = inboxQueue.length ? '<span>' + inboxQueue.length + ' inbox entr' + (inboxQueue.length === 1 ? 'y' : 'ies') + ' saved on this phone, waiting to send</span><button type="button" class="link-btn" id="inbox-send">Send now</button>' : '';
   if (inboxQueue.length) $('inbox-send').onclick = () => inboxFlush(true);
 }
+function queueInbox(text, origin) {
+  inboxQueue.push({ text, id: 'log_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2), origin: origin || 'today' });
+  LS.set('inboxQueue', inboxQueue);
+  renderInboxQueue();
+}
 function saveInbox(event) {
   event.preventDefault();
   const text = $('log-text').value;
   if (!text.trim()) { $('log-status').textContent = 'Enter something to save.'; return; }
-  inboxQueue.push({ text, id: 'log_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2) });
-  LS.set('inboxQueue', inboxQueue);
+  queueInbox(text, 'today');
   $('log-text').value = '';
   $('log-status').textContent = navigator.onLine ? 'Sending…' : 'Saved on this phone · will send when online.';
   renderInboxQueue();
@@ -1047,27 +1223,43 @@ function saveInbox(event) {
 }
 async function inboxFlush(manual) {
   if (inboxSending || !inboxQueue.length || !Conn.paired()) return;
-  if (!navigator.onLine) { if (manual && $('log-status')) $('log-status').textContent = 'Saved on this phone · will send when online.'; return; }
+  if (!navigator.onLine) {
+    if (manual && $('log-status')) $('log-status').textContent = 'Saved on this phone · will send when online.';
+    if (manual) setLogInboxStatus('Waiting to send (' + inboxQueue.length + ')');
+    return;
+  }
   inboxSending = true;
-  let sent = 0, problem = '';
+  let sent = 0, problem = '', logSent = 0, logProblem = '';
   try {
     while (inboxQueue.length) {
       const item = inboxQueue[0];
       try {
         const res = await dash('saveDashboardLog', [item.text, item.id]);
         if (!res || !res.success) throw new Error('Unexpected server response');
-        inboxQueue.shift(); sent++;
+        inboxQueue.shift();
+        if (item.origin === 'log') logSent++; else sent++;
         LS.set('inboxQueue', inboxQueue);
       } catch (e) {
-        if (!e.permanent) { problem = 'Saved on this phone · couldn’t reach Google yet. It will retry.'; break; }
+        if (!e.permanent) {
+          problem = 'Saved on this phone · couldn’t reach Google yet. It will retry.';
+          logProblem = 'Waiting to send (' + inboxQueue.length + ')';
+          break;
+        }
         inboxQueue.shift();
         LS.set('inboxQueue', inboxQueue);
-        if ($('log-text') && !$('log-text').value.trim()) $('log-text').value = item.text;
-        problem = 'Not saved: ' + e.message + ' Your text is back in the box.';
+        if (item.origin === 'log') {
+          if (!S.inboxText.trim()) { S.inboxText = item.text; const box = $('log-inbox-text'); if (box) box.value = item.text; }
+          logProblem = 'Not sent: ' + e.message;
+        } else {
+          if ($('log-text') && !$('log-text').value.trim()) $('log-text').value = item.text;
+          problem = 'Not saved: ' + e.message + ' Your text is back in the box.';
+        }
       }
     }
   } finally { inboxSending = false; LS.set('inboxQueue', inboxQueue); }
   renderInboxQueue();
+  if (logProblem) setLogInboxStatus(logProblem);
+  else if (logSent) setLogInboxStatus('Sent ✓', 4000);
   if ($('log-status')) {
     if (problem) $('log-status').textContent = problem;
     else if (sent) {
@@ -1142,7 +1334,7 @@ function pageEnter(name, title, panelId, after, load, stampKey) {
   if (!el.dataset.built) {
     el.dataset.built = '1';
     el.innerHTML = pageHead(name, title) + '<div id="' + panelId + '" aria-live="polite"></div>' + after;
-    $(name + '-refresh').onclick = () => { T[stampKey] = Date.now(); load(); };
+    $(name + '-refresh').onclick = () => spin($(name + '-refresh'), () => { T[stampKey] = Date.now(); return load(); });
     $(name + '-settings').onclick = () => openSettings();
     $(name + '-pair-btn').onclick = () => openSettings('pair');
   }
@@ -1152,7 +1344,7 @@ function pageEnter(name, title, panelId, after, load, stampKey) {
   if (paired && (!T[stampKey] || Date.now() - T[stampKey] > 120000)) { T[stampKey] = Date.now(); load(); }
 }
 function aheadEnter() { pageEnter('ahead', 'Ahead', 'next-days', '<section id="optional-week" class="optional-week" aria-live="polite"></section>', loadAhead, 'aheadAt'); }
-function loadAhead() { loadNextFewDays(); loadOptionalWeek(); }
+function loadAhead() { return Promise.all([loadNextFewDays(), loadOptionalWeek()]); }
 
 /* Task buttons on Ahead: "Today" moves it to today; "Later" offers +1 day, +3 days or next week.
    Recurring tasks are refused by the server so their repeat isn't lost. */
@@ -1195,7 +1387,7 @@ function taskActions(id, title, row) {
 function loadOptionalWeek() {
   const panel = $('optional-week');
   if (!panel) return;
-  panelLoad('getOptionalTasks', 'optional-week', (result) => {
+  return panelLoad('getOptionalTasks', 'optional-week', (result) => {
     panel.replaceChildren();
     const h = document.createElement('h3'); h.className = 'optional-title'; h.textContent = 'Optional'; panel.appendChild(h);
     const tasks = (result && result.tasks) || [];
@@ -1222,7 +1414,7 @@ function moneyEnter() { pageEnter('money', 'Money', 'money-panel', fileLinks([['
 
 function loadNextFewDays() {
   const panel = $('next-days');
-  panelLoad('getNextFewDays', 'next-days', (result) => {
+  return panelLoad('getNextFewDays', 'next-days', (result) => {
     panel.replaceChildren();
     [result.calendarError, result.tasksError].filter(Boolean).forEach((error) => {
       const w = document.createElement('p'); w.className = 'status'; w.textContent = error; panel.appendChild(w);
@@ -1275,7 +1467,7 @@ function loadNextFewDays() {
 
 function loadMoney() {
   const panel = $('money-panel');
-  panelLoad('getFinanceDashboard', 'money-panel', (result) => {
+  return panelLoad('getFinanceDashboard', 'money-panel', (result) => {
     panel.replaceChildren();
     const budgetBlock = (heading, metrics, error) => {
       const block = document.createElement('section'); block.className = 'money-budget';
@@ -1343,7 +1535,7 @@ const minuteTime = (value) => String(value || '').replace(/(\d{1,2}:\d{2}):\d{2}
 
 function loadRecentLogs() {
   const list = $('recent-logs');
-  panelLoad('getRecentInboxLogs', 'recent-logs', (rows) => {
+  return panelLoad('getRecentInboxLogs', 'recent-logs', (rows) => {
     list.replaceChildren();
     if (!rows || !rows.length) { list.textContent = 'No inbox entries yet.'; return; }
     const hasRoutes = rows.every((entry) => entry.destinations);
@@ -1498,10 +1690,12 @@ function celebrateCompletion() {
   reward.hidden = false;
 }
 
-/* ================= TRENDS view =================
-   Symptom history from Health tracker › Events, via the receiver's "config" answer (HealthLog v6).
-   Each health day (04:00 to 04:00) has the highest pain, stiffness, fatigue, brain fog and headache
-   score logged that day; the day's colour is the average of those highs. Read-only. */
+/* ================= HEALTH view (internal key "trends") =================
+   Symptom history from Health tracker › Events, via the receiver's "config" answer.
+   v16: each health day (04:00 to 04:00) gets a day score = the mean of that day's readings for the chosen
+   symptoms (HealthLog v10 sends the means; older versions only the daily peaks). Days are coloured against
+   "your usual" = the median day score of the 28 days before. Flares are days Ru marks with the Flare button;
+   days much worse than usual get a lighter ring. Read-only. */
 const TREND_SYMS = [
   { k: 'p', name: 'Pain', color: '#2a78d6', dash: '' },
   { k: 's', name: 'Stiffness', color: '#1baf7a', dash: '6 3' },
@@ -1509,8 +1703,15 @@ const TREND_SYMS = [
   { k: 'g', name: 'Brain fog', color: '#7a68e0', dash: '8 3 2 3' },
   { k: 'h', name: 'Headache', color: '#e0679a', dash: '1 4' }
 ];
-const FLARE_AT = 7;
-const TR = { at: 0, loading: false, sel: null, ssel: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f', 'g', 'h']), days: {} };
+/* Tuning: how far from usual counts as better / worse / much worse, and the evidence needed.
+   Tested on 4–28 Oct: averaging pain, stiffness and fatigue hides single-symptom bad days (a fatigue day
+   with pain lower than usual averages out), so a day is "worse" when any chosen symptom is well above its
+   own usual, or the average is. Roughly 1 day in 5 comes out worse with these numbers. */
+const USUAL_DAYS = 28, USUAL_MIN = 5, MIN_READINGS = 2;
+const SYM_WORSE = 1.0, SYM_MUCH = 2.0, AVG_WORSE = 0.5, AVG_MUCH = 1.25, AVG_BETTER = -0.75;
+const TR = { at: 0, loading: false, sel: null, ssel: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f']), days: {} };
+// Brain fog and headache are off by default now; move anyone still on the old default.
+if (TR.inc.length === 5 && ['p', 's', 'f', 'g', 'h'].every((k) => TR.inc.includes(k))) { TR.inc = ['p', 's', 'f']; LS.set('trends.inc', TR.inc); }
 const incSyms = () => TREND_SYMS.filter((x) => TR.inc.includes(x.k));
 const TRENDS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v16h16"/><path d="m7.5 14.5 3.5-4 3 2.5 5-6"/></svg>';
 
@@ -1521,8 +1722,8 @@ function trendsEnter() {
     el.innerHTML = '<div class="top"><span class="eyebrow">LIFE HQ</span><div class="top-actions">' +
       '<button type="button" class="icon-btn" id="trends-refresh" aria-label="Refresh">' + REFRESH_SVG + '</button>' +
       '<button type="button" class="icon-btn" id="trends-settings" aria-label="Settings">' + GEAR + '</button></div></div>' +
-      '<h1 class="page-title">Trends</h1><div id="trends-body" aria-live="polite"></div>';
-    $('trends-refresh').onclick = () => trendsLoad();
+      '<h1 class="page-title">Health</h1><div id="trends-body" aria-live="polite"></div>';
+    $('trends-refresh').onclick = () => spin($('trends-refresh'), trendsLoad);
     $('trends-settings').onclick = () => openSettings();
     el.addEventListener('click', trendsClick);
   }
@@ -1536,18 +1737,65 @@ async function trendsLoad() {
   try { await logRefreshConfig(); } finally { TR.loading = false; trendsRender(); }
 }
 
+const median = (a) => { const b = a.slice().sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+const symVal = (d, k) => (d.a && typeof d.a[k] === 'number' ? d.a[k] : d.a ? undefined : d[k]);
 function trendsDays() {
   const sy = cfg.symptoms;
   if (!sy || !Array.isArray(sy.days) || !sy.startKey) return null;
+  const today = sy.todayKey || addDays(sy.startKey, sy.days.length - 1);
+  const localFlare = {};
+  recent.forEach((r) => { if (r.kind === 'flare' && r.status !== 'failed' && r.hday) localFlare[r.hday] = true; });
   const list = sy.days.map((d, i) => {
-    const have = incSyms().filter((x) => typeof d[x.k] === 'number');
-    const load = have.length ? have.reduce((a, x) => a + d[x.k], 0) / have.length : null;
-    return { key: addDays(sy.startKey, i), d, load, scores: have.length, flare: load !== null && load >= FLARE_AT };
+    const key = addDays(sy.startKey, i);
+    const have = incSyms().filter((x) => typeof symVal(d, x.k) === 'number');
+    const load = have.length ? have.reduce((a, x) => a + symVal(d, x.k), 0) / have.length : null;
+    const readings = d.c ? Math.max.apply(null, [0].concat(have.map((x) => d.c[x.k] || 0))) : (d.n || 0);
+    return { key, d, load, scores: have.length, readings, enough: load !== null && readings >= MIN_READINGS, flag: !!(d.fl || localFlare[key]) };
+  });
+  const enoughDays = list.filter((x) => x.enough);
+  const usualOf = (vals, all) => (vals.length >= USUAL_MIN ? median(vals) : all.length >= USUAL_MIN ? median(all) : null);
+  const allScores = enoughDays.map((x) => x.load);
+  const allSym = {};
+  incSyms().forEach((sm) => { allSym[sm.k] = enoughDays.map((x) => symVal(x.d, sm.k)).filter((v) => typeof v === 'number'); });
+  list.forEach((x, i) => {
+    const prior = list.slice(Math.max(0, i - USUAL_DAYS), i).filter((y) => y.enough);
+    x.usual = usualOf(prior.map((y) => y.load), allScores);
+    // Each chosen symptom against its own usual.
+    x.dev = {};
+    incSyms().forEach((sm) => {
+      const v = symVal(x.d, sm.k);
+      const u = usualOf(prior.map((y) => symVal(y.d, sm.k)).filter((w) => typeof w === 'number'), allSym[sm.k]);
+      if (typeof v === 'number' && u !== null) x.dev[sm.k] = v - u;
+    });
+    const devs = Object.values(x.dev);
+    const avg = devs.length ? devs.reduce((t, v) => t + v, 0) / devs.length : null, max = devs.length ? Math.max.apply(null, devs) : null;
+    x.cls = !x.enough || avg === null ? (x.load !== null ? 'thin' : 'none')
+      : max >= SYM_MUCH || avg >= AVG_MUCH ? 'much' : max >= SYM_WORSE || avg >= AVG_WORSE ? 'worse' : avg <= AVG_BETTER && max < 0.5 ? 'better' : 'usual';
+    x.flare = x.flag || x.cls === 'much';
   });
   const by = {};
   list.forEach((x) => { by[x.key] = x; });
-  return { list, by, today: sy.todayKey || list[list.length - 1].key, marks: Array.isArray(sy.marks) ? sy.marks : [] };
+  return { list, by, today, marks: Array.isArray(sy.marks) ? sy.marks : [], means: list.some((x) => x.d.a) };
 }
+/* Flare episodes: days you marked, joined with the worse days either side; "possible" = runs of much-worse days you didn't mark. */
+function flareEpisodes(list) {
+  const eps = [];
+  let cur = null;
+  list.forEach((x, i) => {
+    const bad = x.flag || x.cls === 'much' || (cur && (x.cls === 'worse'));
+    if (bad) {
+      if (!cur) {
+        cur = { from: x.key, to: x.key, marked: x.flag, days: 1 };
+        // pull in worse days just before a marked day
+        for (let j = i - 1; j >= 0 && (list[j].cls === 'worse' || list[j].cls === 'much') && (!eps.length || list[j].key > eps[eps.length - 1].to); j--) { cur.from = list[j].key; cur.days++; }
+      } else { cur.to = x.key; cur.days++; cur.marked = cur.marked || x.flag; }
+    } else if (cur) { eps.push(cur); cur = null; }
+  });
+  if (cur) eps.push(cur);
+  return eps.filter((e) => e.marked || list.some((x) => x.key >= e.from && x.key <= e.to && x.cls === 'much'));
+}
+const rangeText = (e) => { const a = keyToDate(e.from), b = keyToDate(e.to); const f = (d, m) => d.toLocaleDateString('en-GB', m ? { weekday: 'short', day: 'numeric', month: 'short' } : { weekday: 'short', day: 'numeric' });
+  return e.from === e.to ? f(a, true) : f(a, a.getMonth() !== b.getMonth()) + ' – ' + f(b, true); };
 
 const heatLevel = (l) => (l < 4.5 ? 0 : l < 5.5 ? 1 : l < 6.2 ? 2 : l < 7 ? 3 : 4);
 const shortDate = (k) => keyToDate(k).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
@@ -1559,33 +1807,30 @@ function trendsRender() {
   if (!body) return;
   const T2 = trendsDays();
   if (!T2) {
-    if (!Conn.canLog()) body.innerHTML = '<div class="notice">Pair this icon once to see your trends.<button type="button" class="log wide" data-tr="pair">Pair this icon</button></div>';
+    if (!Conn.canLog()) body.innerHTML = '<div class="notice">Pair this icon once to see your health trends.<button type="button" class="log wide" data-tr="pair">Pair this icon</button></div>';
     else if (TR.loading) body.innerHTML = '<p class="small tr-center">Loading your check-ins…</p>';
-    else body.innerHTML = '<div class="notice">Trends needs the receiver update (HealthLog v6). Once it’s deployed, this page fills in by itself.</div>';
+    else body.innerHTML = '<div class="notice">This page needs the receiver update (HealthLog v6). Once it’s deployed, this page fills in by itself.</div>';
     return;
   }
   const { list, by, today } = T2;
   const last = (n, end) => list.filter((x) => x.key <= addDays(today, -end) && x.key > addDays(today, -end - n));
-  const flares = last(28, 0).filter((x) => x.flare).length;
-  const wk = avgLoad(last(7, 0)), prev = avgLoad(last(7, 7));
-  let worst = '', worstV = -1;
-  TREND_SYMS.forEach((s) => {
-    const v = last(7, 0).filter((x) => typeof x.d[s.k] === 'number');
-    if (!v.length) return;
-    const m = v.reduce((a, x) => a + x.d[s.k], 0) / v.length;
-    if (m > worstV) { worstV = m; worst = s.name; }
-  });
-  const delta = wk !== null && prev !== null ? wk - prev : null;
+  const l28 = last(28, 0);
+  const rough = l28.filter((x) => x.cls === 'worse' || x.cls === 'much').length;
+  const eps = flareEpisodes(list).filter((e) => e.to > addDays(today, -28));
+  const marked = eps.filter((e) => e.marked), possible = eps.filter((e) => !e.marked);
+  const wkDiff = (() => { const v = last(7, 0).filter((x) => x.enough && x.usual !== null); return v.length ? v.reduce((t, x) => t + x.load - x.usual, 0) / v.length : null; })();
   let html = '<div class="tr-stats">' +
-    '<div class="tr-stat"><span>Flare days</span><b>' + flares + '</b><small>last 4 weeks</small></div>' +
-    '<div class="tr-stat"><span>This week</span><b>' + (wk === null ? '–' : wk.toFixed(1)) + '</b>' +
-      (delta === null ? '' : '<small>' + (Math.abs(delta) < 0.05 ? 'same as' : (delta < 0 ? '↓ ' : '↑ ') + Math.abs(delta).toFixed(1) + ' vs') + ' last week</small>') + '</div>' +
-    '<div class="tr-stat"><span>Highest lately</span><b class="tr-word">' + esc(worst || '–') + '</b>' + (worst ? '<small>avg ' + worstV.toFixed(1) + ' this week</small>' : '') + '</div></div>';
+    '<div class="tr-stat"><span>Rough days</span><b>' + rough + '</b><small>last 4 weeks</small></div>' +
+    '<div class="tr-stat"><span>Flares</span><b>' + marked.length + '</b><small>' + (possible.length ? '+' + possible.length + ' possible' : 'last 4 weeks') + '</small></div>' +
+    '<div class="tr-stat"><span>This week</span><b>' + (wkDiff === null ? '–' : Math.abs(wkDiff) < 0.25 ? 'Usual' : (wkDiff > 0 ? '+' : '−') + Math.abs(wkDiff).toFixed(1)) + '</b><small>' + (wkDiff !== null && Math.abs(wkDiff) < 0.25 ? 'about your usual' : 'vs your usual') + '</small></div></div>';
+  if (eps.length) html += '<div class="tr-eps">' + eps.slice(-3).reverse().map((e) => '<div class="tr-ep' + (e.marked ? '' : ' possible') + '"><i></i>' + esc(rangeText(e)) + ' · ' + e.days + (e.days === 1 ? ' day' : ' days') + (e.marked ? '' : ' · possible flare') + '</div>').join('') + '</div>';
 
-  html += '<div class="tr-inc"><span>Flare days count</span>' + TREND_SYMS.map((x) => '<button type="button" class="tr-chip" data-tr="inc" data-v="' + x.k + '" aria-pressed="' + TR.inc.includes(x.k) + '">' + esc(x.name) + '</button>').join('') + '</div>';
+  html += '<div class="tr-inc"><span>Day score uses</span>' + TREND_SYMS.map((x) => '<button type="button" class="tr-chip" data-tr="inc" data-v="' + x.k + '" aria-pressed="' + TR.inc.includes(x.k) + '">' + esc(x.name) + '</button>').join('') + '</div>';
   // Calendar: six Monday-start weeks ending with this week.
   const end = addDays(today, 6 - ((keyToDate(today).getDay() + 6) % 7));
   const start = addDays(end, -41);
+  const CLS = { better: 'hb', usual: 'h1', worse: 'h3', much: 'h4', thin: 'thin' };
+  const WORD = { better: 'better than usual', usual: 'about usual', worse: 'worse than usual', much: 'much worse than usual', thin: 'only one reading' };
   html += '<div class="tr-cal" role="grid" aria-label="Symptom calendar, last six weeks">' +
     ['', 'M', 'T', 'W', 'T', 'F', 'S', 'S'].map((t) => '<span class="tr-dh">' + t + '</span>').join('');
   for (let w = 0; w < 6; w++) {
@@ -1597,35 +1842,38 @@ function trendsRender() {
       if (k === today) cls.push('today');
       if (k === TR.sel) cls.push('sel');
       if (k > today) { html += '<span class="tr-cell future"></span>'; continue; }
-      if (x && x.load !== null) {
-        cls.push('h' + heatLevel(x.load));
-        html += '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + ', average ' + x.load.toFixed(1) + (x.flare ? ', flare' : '') + '">' +
-          n + (x.flare ? '<i class="tr-flare"></i>' : '') + '</button>';
+      const mark = x && x.flag ? '<i class="tr-flare"></i>' : x && x.cls === 'much' ? '<i class="tr-flare ring"></i>' : '';
+      if (x && x.cls !== 'none') {
+        cls.push(CLS[x.cls] || 'h1');
+        html += '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + ', ' + WORD[x.cls] + (x.flag ? ', flare marked' : '') + '">' + n + mark + '</button>';
       } else {
         cls.push('empty');
-        html += '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + ', no check-in">' + n + '</button>';
+        html += '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + (x && x.flag ? ', flare marked' : ', no check-in') + '">' + n + mark + '</button>';
       }
     }
   }
-  html += '</div><div class="tr-key"><span>Lighter</span><span class="tr-ramp"><i class="h0"></i><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i></span><span>Heavier</span>' +
-    '<span><i class="tr-flare inline"></i>Flare</span><span><i class="tr-nodata"></i>No check-in</span></div>';
+  html += '</div><div class="tr-key"><span class="tr-kc"><i class="hb"></i>Better</span><span class="tr-kc"><i class="h1"></i>Usual</span><span class="tr-kc"><i class="h3"></i>Worse</span><span class="tr-kc"><i class="h4"></i>Much worse</span>' +
+    '<span><i class="tr-flare inline"></i>Flare (you marked)</span><span><i class="tr-flare inline ring"></i>Possible flare</span></div>';
 
-  // Detail line for the chosen day.
+  // Detail for the chosen day, with its 24-hour strip.
   const sel = TR.sel && TR.sel <= today ? TR.sel : null;
   if (sel) {
     const x = by[sel];
+    const vals = x ? TREND_SYMS.filter((sm) => typeof symVal(x.d, sm.k) === 'number').map((sm) => sm.name.toLowerCase() + ' ' + symVal(x.d, sm.k)) : [];
     html += '<p class="tr-detail"><b>' + esc(longDate(sel)) + '</b> · ' + (x && x.load !== null
-      ? 'average ' + x.load.toFixed(1) + (x.flare ? ' · flare' : '') + ' · ' + TREND_SYMS.filter((s) => typeof x.d[s.k] === 'number').map((s) => s.name.toLowerCase() + ' ' + x.d[s.k]).join(', ') + (x.scores < 3 ? ' · only ' + x.scores + ' of 5 scored' : '')
-      : (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>';
-  } else html += '<p class="tr-detail muted">Tap a day for its highest scores.</p>';
+      ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') + (x.flag ? ' · flare marked' : '') + ' · ' + vals.join(', ') +
+        (Object.keys(x.dev || {}).filter((kk) => x.dev[kk] >= SYM_WORSE).length ? ' · above usual: ' + Object.keys(x.dev).filter((kk) => x.dev[kk] >= SYM_WORSE).map((kk) => TREND_SYMS.find((t) => t.k === kk).name.toLowerCase() + ' +' + x.dev[kk].toFixed(1)).join(', ') : '') +
+        (x.readings ? ' · ' + x.readings + (x.readings === 1 ? ' reading' : ' readings') : '') + (T2.means ? '' : ' · daily highs')
+      : (x && x.flag ? 'flare marked · ' : '') + (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>' + dayStrip(sel);
+  } else html += '<p class="tr-detail muted">Tap a day for its scores and a 24-hour view.</p>';
 
   // Chart chips + chart.
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS);
   html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
-  html += trendsChart(T2);
+  html += trendsChart(T2) + activityText(T2);
   html += stomachView(T2) + sleepView(T2);
-  html += '<p class="tr-foot">Each day shows the highest score you logged for each symptom; the colour is the average of the ones you’ve chosen to count. A flare is an average of ' + FLARE_AT + ' or more. Days run 04:00 to 04:00.</p>' +
+  html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. Flares are days you mark with the Flare button on the Log page; a ring marks a day much worse than usual. Days run 04:00 to 04:00.</p>' +
     fileLinks([['Health tracker', LINKS.healthSheet]]);
   body.innerHTML = html;
 }
@@ -1635,7 +1883,9 @@ function trendsChart(T2) {
   // Start the chart at the first logged day (at least the last 14 days) so empty weeks don't squash it.
   const firstData = T2.list.findIndex((x) => x.load !== null);
   const list = T2.list.slice(Math.max(0, Math.min(firstData < 0 ? 0 : firstData, T2.list.length - 14)));
-  const W = 360, H = 190, L = 22, R = 8, TOP = 16, B = 22;
+  const hasAct = list.some((x) => x.d.al);
+  const BAND = hasAct ? 30 : 0;
+  const W = 360, H = 190 + BAND, L = 22, R = 8, TOP = 16, B = 22 + BAND;
   const n = list.length, cw = W - L - R, ch = H - TOP - B;
   const X = (i) => L + (n > 1 ? (i * cw) / (n - 1) : 0);
   const Y = (v) => TOP + ch - (v / 10) * ch;
@@ -1661,16 +1911,84 @@ function trendsChart(T2) {
   const dots = (get, cls) => list.map((x, i) => { const v = get(x); return typeof v === 'number' && (i === 0 || typeof get(list[i - 1]) !== 'number') && (i === n - 1 || typeof get(list[i + 1]) !== 'number') ? '<circle cx="' + X(i) + '" cy="' + Y(v) + '" r="2" class="' + cls + '"/>' : ''; }).join('');
   TREND_SYMS.forEach((s) => {
     if (!TR.on.includes(s.k)) return;
-    const get = (x) => x.d[s.k];
+    const get = (x) => symVal(x.d, s.k);
     svg += '<path d="' + path(get) + '" fill="none" stroke="' + s.color + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"' + (s.dash ? ' stroke-dasharray="' + s.dash + '"' : '') + '/>' +
       dots(get, '').replace(/class=""/g, 'fill="' + s.color + '"');
   });
   if (TR.on.includes('load')) {
     const get = (x) => x.load;
     svg += '<path d="' + path(get) + '" fill="none" class="tr-load"/>' + dots(get, 'tr-loaddot');
-    list.forEach((x, i) => { if (x.flare) svg += '<circle cx="' + X(i) + '" cy="' + Y(x.load) + '" r="3.6" class="tr-flaredot"/>'; });
+    list.forEach((x, i) => { if (x.flare && x.load !== null) svg += '<circle cx="' + X(i) + '" cy="' + Y(x.load) + '" r="3.6" class="tr-flaredot' + (x.flag ? '' : ' ring') + '"/>'; });
+  }
+  // Activity load as thin bars under the chart, on the same days.
+  if (hasAct) {
+    const max = Math.max.apply(null, list.map((x) => x.d.al || 0));
+    const top = TOP + ch + 8, hgt = BAND - 10, bwid = Math.max(2, Math.min(8, (cw / Math.max(1, n - 1)) * 0.6));
+    svg += '<text x="' + (L - 5) + '" y="' + (top + hgt - 2) + '" class="tr-ax" text-anchor="end">act</text><line x1="' + L + '" x2="' + (W - R) + '" y1="' + (top + hgt) + '" y2="' + (top + hgt) + '" class="tr-grid"/>';
+    list.forEach((x, i) => {
+      if (!x.d.al) return;
+      const h = Math.max(1.5, (x.d.al / max) * hgt);
+      svg += '<rect x="' + (X(i) - bwid / 2).toFixed(1) + '" y="' + (top + hgt - h).toFixed(1) + '" width="' + bwid.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1" class="tr-actbar"><title>' + esc(longDate(x.key)) + ': ' + x.d.am + ' min active</title></rect>';
+    });
   }
   return svg + '</svg>';
+}
+
+/* Activity and the next days: busiest vs quiet days, fatigue 1 and 2 days later. A pattern, not a cause. */
+function activityText(T2) {
+  const list = T2.list;
+  if (!list.some((x) => x.d.al)) return '';
+  const fat = (x) => (x ? symVal(x.d, 'f') : undefined);
+  const idx = {}; list.forEach((x, i) => { idx[x.key] = i; });
+  const active = list.filter((x) => x.d.al).sort((a, b) => b.d.al - a.d.al).slice(0, 5);
+  const quiet = list.filter((x) => !x.d.al && x.load !== null).slice(-5);
+  const after = (days, lag) => { const v = days.map((x) => fat(list[idx[x.key] + lag])).filter((y) => typeof y === 'number'); return v.length ? { m: v.reduce((t, y) => t + y, 0) / v.length, n: v.length } : null; };
+  const a1 = after(active, 1), q1 = after(quiet, 1), a2 = after(active, 2), q2 = after(quiet, 2);
+  const week = list.slice(-7).reduce((t, x) => t + (x.d.am || 0), 0);
+  let text = 'Activity logged in the last 7 days: ' + week + ' min.';
+  if (a1 && q1 && a1.n >= 3 && q1.n >= 3) {
+    text += ' After your ' + active.length + ' busiest days, fatigue the next day averaged ' + a1.m.toFixed(1) + ' vs ' + q1.m.toFixed(1) + ' after quiet days (n=' + a1.n + '/' + q1.n + ')';
+    if (a2 && q2 && a2.n >= 3 && q2.n >= 3) text += '; two days later ' + a2.m.toFixed(1) + ' vs ' + q2.m.toFixed(1) + ' (n=' + a2.n + '/' + q2.n + ')';
+    text += '. A pattern in your logs, not proof of cause.';
+  } else text += ' A few more logged days and this will compare busy and quiet days with fatigue the day after.';
+  return '<p class="tr-detail">' + esc(text) + '</p>';
+}
+
+/* 24-hour strip for a chosen day (04:00 → 04:00): activity spans, check-in scores (chosen symptoms) as dots,
+   food and bowel as ticks. Uses the receiver's "day" answer (activity/checks need HealthLog v10). */
+function dayStrip(k) {
+  const det = TR.days[k];
+  if (!det) { loadDayDetail(k); return '<p class="small">Loading the day…</p>'; }
+  if (det.error) return '<p class="small">' + esc(det.error) + '</p>';
+  const W = 360, L = 8, R = 8, cw = W - L - R, H = 104;
+  const mins = (t) => { const m = /^(\d{2}):(\d{2})$/.exec(t || ''); if (!m) return null; let v = Number(m[1]) * 60 + Number(m[2]) - 240; return v < 0 ? v + 1440 : v; };
+  const X = (v) => L + (v / 1440) * cw;
+  let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(longDate(k)) + ' hour by hour">';
+  [0, 240, 480, 720, 960, 1200, 1440].forEach((v) => {
+    svg += '<line x1="' + X(v) + '" x2="' + X(v) + '" y1="4" y2="' + (H - 14) + '" class="tr-bedline"/>' +
+      '<text x="' + X(v) + '" y="' + (H - 2) + '" class="tr-ax" text-anchor="' + (v === 0 ? 'start' : v === 1440 ? 'end' : 'middle') + '">' + pad(((v / 60) + 4) % 24) + ':00</text>';
+  });
+  (det.activity || []).forEach((a) => {
+    const s0 = mins(a.time); if (s0 === null) return;
+    svg += '<rect x="' + X(s0).toFixed(1) + '" y="6" width="' + Math.max(2, X(Math.min(1440, s0 + a.min)) - X(s0)).toFixed(1) + '" height="12" rx="2" class="tr-actspan w' + (a.w || 2) + '"><title>' + esc(a.time + ' · ' + a.text + ' · ' + a.min + ' min') + '</title></rect>';
+  });
+  const top = 26, bot = 70;
+  svg += '<text x="' + (L + 1) + '" y="' + (top + 7) + '" class="tr-ax">10</text>';
+  (det.checks || []).forEach((c) => {
+    const t = mins(c.time); if (t === null) return;
+    if (c.flare) { svg += '<circle cx="' + X(t).toFixed(1) + '" cy="' + top + '" r="4" class="tr-flaredot"><title>' + esc(c.time) + ' flare</title></circle>'; return; }
+    const v = incSyms().map((x) => c.s[x.k]).filter((y) => typeof y === 'number');
+    if (!v.length) return;
+    const m = v.reduce((a, y) => a + y, 0) / v.length;
+    svg += '<circle cx="' + X(t).toFixed(1) + '" cy="' + (bot - (m / 10) * (bot - top)).toFixed(1) + '" r="3.5" class="tr-loaddot"><title>' + esc(c.time + ' · ' + m.toFixed(1)) + '</title></circle>';
+  });
+  const ticks = (items, cls, y) => (items || []).forEach((x) => { const t = mins(x.time); if (t !== null) svg += '<line x1="' + X(t).toFixed(1) + '" x2="' + X(t).toFixed(1) + '" y1="' + y + '" y2="' + (y + 9) + '" class="' + cls + '"><title>' + esc(x.time + ' · ' + x.text) + '</title></line>'; });
+  ticks(det.meals, 'tr-tick food', 76);
+  ticks(det.bowel, 'tr-tick bowel', 76);
+  svg += '</svg>';
+  const has = (det.activity || []).length || (det.checks || []).length || (det.meals || []).length || (det.bowel || []).length;
+  return svg + '<div class="tr-key"><span><i class="tr-kbar"></i>Activity</span><span><i class="tr-kdot"></i>Check-in (chosen symptoms)</span><span><i class="tr-ktick food"></i>Food</span><span><i class="tr-ktick bowel"></i>Bowel</span></div>' +
+    (has ? '' : '<p class="small">Nothing with a clock time logged that day.</p>') + ((det.activity === undefined) ? '<p class="small">Activity and check-in times need the HealthLog v10 update.</p>' : '');
 }
 
 /* ---------- Stomach: average stomach pain each day, omeprazole days, tap for food; then stomach through the day ---------- */
@@ -1801,13 +2119,16 @@ function stomachView(T2) {
   }
   return html + '<div class="tr-day"><p class="tr-detail" style="margin:10px 0 6px">' + head + '</p>' + body + '</div>' + parts;
 }
+const dayLoading = {};
 async function loadDayDetail(k) {
-  if (TR.days[k] && !TR.days[k].error) return;
+  if ((TR.days[k] && !TR.days[k].error) || dayLoading[k]) return;
+  dayLoading[k] = true;
   delete TR.days[k];
   try {
     const res = await api({ action: 'day', key: k });
     TR.days[k] = res && res.success ? res : { error: (res && res.error) === 'Unknown action.' ? 'Needs the HealthLog v7 update on the receiver.' : 'Couldn’t load that day.' };
   } catch (e) { TR.days[k] = { error: 'Couldn’t load that day (offline?).' }; }
+  delete dayLoading[k];
   if (view === 'trends') trendsRender();
 }
 
@@ -1888,7 +2209,7 @@ function trendsClick(ev) {
   const el = ev.target.closest('[data-tr]');
   if (!el) return;
   const act = el.dataset.tr, v = el.dataset.v;
-  if (act === 'day') { TR.sel = TR.sel === v ? null : v; trendsRender(); }
+  if (act === 'day') { TR.sel = TR.sel === v ? null : v; trendsRender(); if (TR.sel) loadDayDetail(TR.sel); }
   else if (act === 'series') {
     TR.on = TR.on.includes(v) ? TR.on.filter((x) => x !== v) : TR.on.concat(v);
     if (!TR.on.length) TR.on = ['load'];
@@ -1912,6 +2233,7 @@ document.addEventListener('click', (ev) => {
 });
 document.addEventListener('submit', (ev) => {
   if (ev.target.id === 'pair-form') { ev.preventDefault(); pairSubmit(); }
+  else if (ev.target.id === 'log-inbox-form') { ev.preventDefault(); logInboxSubmit(); }
 });
 
 window.addEventListener('online', () => { logFlush(); inboxFlush(); });
@@ -1929,7 +2251,7 @@ document.addEventListener('visibilitychange', () => {
 });
 setInterval(() => {
   if (document.hidden) return;
-  if (view === 'log' && !S.timeOpen && !S.open && document.activeElement.tagName !== 'INPUT') logRender();
+  if (view === 'log' && !S.timeOpen && !S.open && !S.sheet && document.activeElement.tagName !== 'INPUT') logRender();
   if (queue.length) logFlush();
 }, 60000);
 
