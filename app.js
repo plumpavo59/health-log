@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v17 · 28 Oct';
+const APP_VERSION = 'v18 · 28 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -536,12 +536,12 @@ function sheetView() {
     body = bowelBody();
   } else if (S.sheet === 'food') {
     btn = '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button>';
-    body = '<input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="done">' +
+    body = '<input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="send">' +
       '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div>';
   } else if (S.sheet === 'activity') {
     btn = '<button type="button" class="log" id="act-log" data-act="activity"' + (actRoute() ? '' : ' disabled') + '>' + (actRoute() === 'inbox' ? 'Send to inbox' : 'Log') + '</button>';
     const chips = (act, list, cur, fmt) => '<div class="chips">' + list.map((x) => '<button type="button" class="chip food" data-act="' + act + '" data-v="' + esc(x) + '" aria-pressed="' + (cur === x) + '">' + esc(fmt ? fmt(x) : x) + '</button>').join('') + '</div>';
-    body = '<input type="text" id="act-input" data-field="actText" value="' + esc(S.actText) + '" placeholder="What did you do?" aria-label="What did you do" autocomplete="off" enterkeyhint="done">' +
+    body = '<input type="text" id="act-input" data-field="actText" value="' + esc(S.actText) + '" placeholder="What did you do?" aria-label="What did you do" autocomplete="off" enterkeyhint="send">' +
       '<div class="opt-h">Type</div>' + chips('act-type', ACT_TYPES, S.actType) +
       '<div class="opt-h">Minutes</div>' + chips('act-min', ACT_MINS.map(String), S.actMin === null ? null : String(S.actMin), (x) => (x === '120' ? '120+' : x)) +
       '<div class="opt-h">Effort</div><div class="grid3" role="group" aria-label="Effort">' + ACT_EFFORT.map((e) => '<button type="button" class="seg" data-act="act-effort" data-v="' + e + '" aria-pressed="' + (S.actEffort === e) + '">' + e + '</button>').join('') + '</div>' +
@@ -594,6 +594,15 @@ document.addEventListener('touchend', () => {
   if (!sheetDrag) return;
   const d = sheetDrag; sheetDrag = null;
   if (d.dy > 90) { if (d.el.id === 'tr-sheet') closePatterns(); else closeSheet(); } else d.el.style.transform = '';
+});
+/* Enter (phone keyboard's Done/Go too) logs whatever the open sheet is for, if it's ready. */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229 || e.shiftKey || !S.sheet) return;
+  const sh = $('sheet');
+  if (!sh || (e.target.closest && e.target.closest('button'))) return;
+  e.preventDefault();
+  const btn = sh.querySelector('.sheet-head .log');
+  if (btn && !btn.disabled) btn.click();
 });
 document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (S.sheet) closeSheet(); else if (TR.pop) closePatterns(); });
 /* Flare: one tap logs "Flare" for today (Symptom update). Shown on the Health calendar. */
@@ -746,7 +755,8 @@ async function logRefreshConfig() {
   try {
     const res = await api({ action: 'config' });
     if (res && res.success) {
-      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, today: res.today || FALLBACK.today };
+      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds, today: res.today || FALLBACK.today };
+      if ($('medications') && !$('medications').hidden) renderRecentMeds();
       if (S.sheet && document.activeElement && /INPUT/.test(document.activeElement.tagName) && document.activeElement.closest('#sheet')) {
         LS.set('config', { data: cfg, day: dayKey(new Date()) });   // don't rebuild a sheet while typing in it
         if (view === 'trends') trendsRender();
@@ -1586,19 +1596,26 @@ function loadRecentLogs() {
   }, 'Loading…');
 }
 
-function loadExtras() {
+/* Recent meds: straight from Health tracker › Events via the receiver (HealthLog v11), last 7 days, newest first. */
+function renderRecentMeds(stamp) {
   const list = $('medications');
-  panelLoad('getDashboardExtras', 'medications', (res) => {
-    list.replaceChildren();
-    if (res.medicationError) { list.textContent = res.medicationError; return; }
-    if (!res.medications.length) { list.textContent = 'No medication events in the feed.'; return; }
-    res.medications.forEach((event) => {
-      const row = document.createElement('div'); row.className = 'medication-row';
-      const name = document.createElement('div'); name.className = 'medication-name'; name.textContent = event.medication;
-      const time = document.createElement('div'); time.className = 'medication-time'; time.textContent = minuteTime(event.timestamp);
-      row.append(name, time); list.appendChild(row);
-    });
-  }, 'Loading…');
+  if (!list) return;
+  const rows = cfg.recentMeds;
+  list.replaceChildren();
+  if (!Array.isArray(rows)) { list.textContent = stamp || 'Recent meds needs the HealthLog v11 update on the receiver.'; return; }
+  if (!rows.length) list.textContent = 'No medication logged in the last 7 days.';
+  rows.forEach((e) => {
+    const row = document.createElement('div'); row.className = 'medication-row';
+    const name = document.createElement('div'); name.className = 'medication-name'; name.textContent = e.name + (e.dose ? ' · ' + e.dose : '');
+    const time = document.createElement('div'); time.className = 'medication-time'; time.textContent = e.when;
+    row.append(name, time); list.appendChild(row);
+  });
+  if (stamp && rows.length) { const p = document.createElement('p'); p.className = 'panel-stamp'; p.textContent = stamp; list.appendChild(p); }
+}
+async function loadExtras() {
+  renderRecentMeds('Updating…');
+  const ok = await logRefreshConfig();
+  renderRecentMeds(ok ? '' : 'Couldn’t refresh (offline?) · showing the last copy');
 }
 
 /* ---------- celebration ---------- */
