@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v16 · 28 Oct';
+const APP_VERSION = 'v17 · 28 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -111,6 +111,10 @@ function defaultDeviceName() {
 let view = null, lastMainView = START;
 function showView(v) {
   view = v;
+  // Pop-ups belong to their page: close them when moving to another tab.
+  if (v !== 'log') S.sheet = null;
+  if (v !== 'trends') TR.pop = null;
+  document.body.classList.remove('sheet-open');
   if (v !== 'settings') lastMainView = v;
   ['today', 'ahead', 'money', 'trends', 'log', 'settings'].forEach((name) => { const el = $(name + '-view'); if (el) el.hidden = name !== v; });
   $('tabbar').hidden = v === 'settings';
@@ -464,7 +468,7 @@ function logRender() {
         '<span class="st' + (r.status === 'failed' ? ' bad' : '') + '">' + (r.status === 'saved' ? 'Saved' : r.status === 'failed' ? 'Not saved' : 'Waiting') + '</span>') + '</div>').join('') + '</section>' : '') +
     sheetView();
   S.sheetFresh = false;
-  document.body.classList.toggle('sheet-open', !!S.sheet);
+  document.body.classList.toggle('sheet-open', !!S.sheet || !!TR.pop);
   updateCheckButton();
 }
 
@@ -577,7 +581,7 @@ function closeSheet() {
 }
 let sheetDrag = null;
 document.addEventListener('touchstart', (e) => {
-  const sh = e.target.closest && e.target.closest('#sheet');
+  const sh = e.target.closest && e.target.closest('#sheet, #tr-sheet');
   if (!sh || sh.scrollTop > 0 || e.target.closest('input')) return;
   sheetDrag = { y: e.touches[0].clientY, dy: 0, el: sh };
 }, { passive: true });
@@ -589,9 +593,9 @@ document.addEventListener('touchmove', (e) => {
 document.addEventListener('touchend', () => {
   if (!sheetDrag) return;
   const d = sheetDrag; sheetDrag = null;
-  if (d.dy > 90) closeSheet(); else d.el.style.transform = '';
+  if (d.dy > 90) { if (d.el.id === 'tr-sheet') closePatterns(); else closeSheet(); } else d.el.style.transform = '';
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.sheet) closeSheet(); });
+document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (S.sheet) closeSheet(); else if (TR.pop) closePatterns(); });
 /* Flare: one tap logs "Flare" for today (Symptom update). Shown on the Health calendar. */
 function flareToday() {
   const hk = healthKey(new Date());
@@ -1871,10 +1875,17 @@ function trendsRender() {
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS);
   html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
-  html += trendsChart(T2) + activityText(T2);
+  html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
   html += stomachView(T2) + sleepView(T2);
   html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. Flares are days you mark with the Flare button on the Log page; a ring marks a day much worse than usual. Days run 04:00 to 04:00.</p>' +
     fileLinks([['Health tracker', LINKS.healthSheet]]);
+  if (TR.pop) {
+    const G = giData();
+    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : null;
+    html += patternsPopup(pop);
+    TR.popFresh = false;
+  }
+  document.body.classList.toggle('sheet-open', !!TR.pop || !!S.sheet);
   body.innerHTML = html;
 }
 
@@ -1934,25 +1945,58 @@ function trendsChart(T2) {
   return svg + '</svg>';
 }
 
-/* Activity and the next days: busiest vs quiet days, fatigue 1 and 2 days later. A pattern, not a cause. */
-function activityText(T2) {
+/* ---------- Patterns pop-up: each section's comparisons as side-by-side numbers ---------- */
+const mean1 = (a) => (a.length ? a.reduce((t, x) => t + x, 0) / a.length : null);
+const patBtn = (key, label) => '<button type="button" class="pt-btn" data-tr="pat" data-v="' + key + '" aria-haspopup="dialog">' + esc(label) + '<span aria-hidden="true">›</span></button>';
+/* Verdict for "after A vs after B" on the day score (higher = heavier day). */
+function nextDayVerdict(a, b, bName) {
+  if (a === null || b === null) return { text: '', tone: '' };
+  const d = b - a;
+  if (Math.abs(d) < 0.4) return { text: 'No clear difference yet', tone: 'same' };
+  return d > 0 ? { text: 'Heavier days after ' + bName, tone: 'worse' } : { text: 'Lighter days after ' + bName, tone: 'better' };
+}
+/* Activity: busiest vs quiet days, fatigue 1 and 2 days later. */
+function activityPatterns(T2) {
   const list = T2.list;
-  if (!list.some((x) => x.d.al)) return '';
+  if (!list.some((x) => x.d.al)) return null;
   const fat = (x) => (x ? symVal(x.d, 'f') : undefined);
   const idx = {}; list.forEach((x, i) => { idx[x.key] = i; });
   const active = list.filter((x) => x.d.al).sort((a, b) => b.d.al - a.d.al).slice(0, 5);
   const quiet = list.filter((x) => !x.d.al && x.load !== null).slice(-5);
-  const after = (days, lag) => { const v = days.map((x) => fat(list[idx[x.key] + lag])).filter((y) => typeof y === 'number'); return v.length ? { m: v.reduce((t, y) => t + y, 0) / v.length, n: v.length } : null; };
-  const a1 = after(active, 1), q1 = after(quiet, 1), a2 = after(active, 2), q2 = after(quiet, 2);
+  const after = (days, lag) => { const v = days.map((x) => fat(list[idx[x.key] + lag])).filter((y) => typeof y === 'number'); return v.length ? { m: mean1(v), n: v.length } : null; };
   const week = list.slice(-7).reduce((t, x) => t + (x.d.am || 0), 0);
-  let text = 'Activity logged in the last 7 days: ' + week + ' min.';
-  if (a1 && q1 && a1.n >= 3 && q1.n >= 3) {
-    text += ' After your ' + active.length + ' busiest days, fatigue the next day averaged ' + a1.m.toFixed(1) + ' vs ' + q1.m.toFixed(1) + ' after quiet days (n=' + a1.n + '/' + q1.n + ')';
-    if (a2 && q2 && a2.n >= 3 && q2.n >= 3) text += '; two days later ' + a2.m.toFixed(1) + ' vs ' + q2.m.toFixed(1) + ' (n=' + a2.n + '/' + q2.n + ')';
-    text += '. A pattern in your logs, not proof of cause.';
-  } else text += ' A few more logged days and this will compare busy and quiet days with fatigue the day after.';
-  return '<p class="tr-detail">' + esc(text) + '</p>';
+  const p = { title: 'Activity patterns', stats: [{ label: 'Active, last 7 days', value: week + ' min' }], comps: [] };
+  [[1, 'Fatigue the next day'], [2, 'Fatigue two days later']].forEach(([lag, title]) => {
+    const a = after(active, lag), q = after(quiet, lag);
+    if (!a || !q || a.n < 3 || q.n < 3) return;
+    const d = a.m - q.m;
+    p.comps.push({ title, left: { label: 'After quiet days', value: q.m.toFixed(1), sub: q.n + ' days' }, right: { label: 'After your busiest days', value: a.m.toFixed(1), sub: a.n + ' days' },
+      verdict: Math.abs(d) < 0.4 ? 'No clear difference yet' : d > 0 ? 'More tired after busy days' : 'Less tired after busy days', tone: Math.abs(d) < 0.4 ? 'same' : d > 0 ? 'worse' : 'better' });
+  });
+  if (!p.comps.length) p.empty = 'A few more logged days and this will compare busy and quiet days with fatigue afterwards.';
+  p.note = 'Busiest = the 5 days with the most activity (minutes × effort). Quiet = recent days with none logged.';
+  return p;
 }
+function patternsHtml(p) {
+  const cell = (x) => '<div class="pt-cell"><span>' + esc(x.label) + '</span><b>' + esc(x.value) + '</b>' + (x.sub ? '<small>' + esc(x.sub) + '</small>' : '') + '</div>';
+  let h = '';
+  if (p.stats && p.stats.length) h += '<div class="pt-stats">' + p.stats.map(cell).join('') + '</div>';
+  (p.comps || []).forEach((c) => {
+    h += '<div class="pt"><div class="pt-h">' + esc(c.title) + '</div><div class="pt-row">' + cell(c.left) + cell(c.right) + '</div>' +
+      (c.verdict ? '<div class="pt-v ' + (c.tone || '') + '">' + esc(c.verdict) + '</div>' : '') + '</div>';
+  });
+  if (p.empty) h += '<p class="small">' + esc(p.empty) + '</p>';
+  if (p.note) h += '<p class="pt-note">' + esc(p.note) + '</p>';
+  return h;
+}
+function patternsPopup(p) {
+  if (!p) return '';
+  return '<div class="sheet-backdrop' + (TR.popFresh ? ' fresh' : '') + '" data-tr="pat-close"></div>' +
+    '<div class="sheet' + (TR.popFresh ? ' fresh' : '') + '" id="tr-sheet" role="dialog" aria-modal="true" aria-labelledby="tr-sheet-title">' +
+    '<div class="sheet-grab" aria-hidden="true"></div><div class="sheet-head"><h2 id="tr-sheet-title">' + esc(p.title) + '</h2>' +
+    '<button type="button" class="icon-btn sheet-x" data-tr="pat-close" aria-label="Close">' + X_SVG + '</button></div>' + patternsHtml(p) + '</div>';
+}
+function closePatterns() { if (!TR.pop) return; TR.pop = null; trendsRender(); }
 
 /* 24-hour strip for a chosen day (04:00 → 04:00): activity spans, check-in scores (chosen symptoms) as dots,
    food and bowel as ticks. Uses the receiver's "day" answer (activity/checks need HealthLog v10). */
@@ -2043,27 +2087,39 @@ function dayPartsView(G, today) {
   svg += '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(first)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(today)) + '</text></svg>';
   return '<div class="tr-sub">Through the day</div>' + svg +
     '<div class="tr-key"><span><i class="tr-omeline-key"></i>Omeprazole started</span><span><i class="tr-part-key yes"></i>Woke with pain, no score</span></div>' +
-    '<p class="tr-detail">' + esc(morningSummary(G, today)) + '</p>';
+    patBtn('stomach', 'Stomach patterns');
 }
 /* Mornings before vs since the current omeprazole run (all 120 days the receiver sends). */
-function morningSummary(G, today) {
-  if (!G.omeStart) return 'Morning = from waking to about 1pm. Once omeprazole is logged, this compares mornings before and since.';
+function stomachPatterns(G, today) {
+  const p = { title: 'Stomach patterns', comps: [], note: 'Morning = waking to about 1pm. A morning counts as painful at 2 or more, or when a note says you woke with stomach pain. Only logged mornings count.' };
+  if (!G.omeStart) { p.empty = 'Once omeprazole is logged, this compares mornings before and since.'; return p; }
   const S = { b: { n: 0, pain: 0, sc: [], rest: [] }, a: { n: 0, pain: 0, sc: [], rest: [] } };
   Object.keys(G.by).filter((k) => k <= today).forEach((k) => {
     const d = G.by[k], s = S[k < G.omeStart ? 'b' : 'a'];
     if (giNum(d[1]) || d[5] === 1 || d[5] === 0) { s.n++; if ((giNum(d[1]) && d[1] >= 2) || (!giNum(d[1]) && d[5] === 1)) s.pain++; }
     if (giNum(d[1])) s.sc.push(d[1]);
     const rest = [d[2], d[3], d[4]].filter(giNum);
-    if (rest.length) s.rest.push(rest.reduce((t, x) => t + x, 0) / rest.length);
+    if (rest.length) s.rest.push(mean1(rest));
   });
-  const mean = (a) => (a.length ? (a.reduce((t, x) => t + x, 0) / a.length).toFixed(1) : null);
-  const part = (s) => s.pain + ' of ' + s.n + (mean(s.sc) !== null ? ', avg ' + mean(s.sc) : '');
-  if (S.b.n < 3) return 'Morning = waking to about 1pm. Not enough mornings logged before omeprazole (started ' + shortDate(G.omeStart) + ') to compare yet.';
-  if (S.a.n < 3) return 'Morning = waking to about 1pm. Omeprazole started ' + shortDate(G.omeStart) + '; a few more logged mornings and this will compare before and since.';
-  const rb = mean(S.b.rest), ra = mean(S.a.rest);
-  return 'Mornings with stomach pain (2+, or a note saying so): before omeprazole ' + part(S.b) + '; since ' + shortDate(G.omeStart) + ' ' + part(S.a) + '.' +
-    (rb !== null && ra !== null ? ' Rest of the day: ' + rb + ' before, ' + ra + ' since.' : '') +
-    ' Logged mornings only (waking to about 1pm); patterns, not proof.';
+  if (S.b.n < 3 || S.a.n < 3) { p.empty = S.b.n < 3 ? 'Not enough mornings logged before omeprazole (started ' + shortDate(G.omeStart) + ') to compare yet.' : 'Omeprazole started ' + shortDate(G.omeStart) + '; a few more logged mornings and this will compare before and since.'; return p; }
+  const since = 'Since ' + shortDate(G.omeStart);
+  const pct = (s) => Math.round((100 * s.pain) / s.n);
+  const dp = pct(S.a) - pct(S.b);
+  p.comps.push({ title: 'Mornings with stomach pain', left: { label: 'Before omeprazole', value: S.b.pain + ' of ' + S.b.n, sub: pct(S.b) + '%' }, right: { label: since, value: S.a.pain + ' of ' + S.a.n, sub: pct(S.a) + '%' },
+    verdict: Math.abs(dp) < 10 ? 'About the same' : dp < 0 ? 'Fewer painful mornings since' : 'More painful mornings since', tone: Math.abs(dp) < 10 ? 'same' : dp < 0 ? 'better' : 'worse' });
+  const mb = mean1(S.b.sc), ma = mean1(S.a.sc);
+  if (mb !== null && ma !== null) {
+    const d = ma - mb;
+    p.comps.push({ title: 'Morning stomach pain, average', left: { label: 'Before', value: mb.toFixed(1) }, right: { label: since, value: ma.toFixed(1) },
+      verdict: Math.abs(d) < 0.5 ? 'About the same' : d < 0 ? 'Lower since' : 'Higher since', tone: Math.abs(d) < 0.5 ? 'same' : d < 0 ? 'better' : 'worse' });
+  }
+  const rb = mean1(S.b.rest), ra = mean1(S.a.rest);
+  if (rb !== null && ra !== null) {
+    const d = ra - rb;
+    p.comps.push({ title: 'Rest of the day (afternoon to night), average', left: { label: 'Before', value: rb.toFixed(1) }, right: { label: since, value: ra.toFixed(1) },
+      verdict: Math.abs(d) < 0.5 ? 'About the same' : d < 0 ? 'Lower since' : 'Higher since', tone: Math.abs(d) < 0.5 ? 'same' : d < 0 ? 'better' : 'worse' });
+  }
+  return p;
 }
 function stomachView(T2) {
   const { by, today } = T2;
@@ -2168,41 +2224,36 @@ function sleepView(T2) {
     });
     return svg + axis(H) + '</svg>';
   };
-  const nightsQ = list.filter((d) => typeof d.d.q === 'number');
-  const nightsH = list.filter((d) => typeof d.d.sl === 'number');
-  const nightsB = list.filter((d) => bedMinutes(d.d.bt) !== null);
-  const compare = (a, b, aText, bText) => {
-    const A = a.filter((d) => d.load !== null), B = b.filter((d) => d.load !== null);
-    if (A.length < 3 || B.length < 3) return '';
-    const ga = avgLoad(A), gb = avgLoad(B), diff = gb - ga;
-    return ' Days after ' + aText + ' averaged ' + ga.toFixed(1) + '; after ' + bText + ', ' + gb.toFixed(1) + ' (' + A.length + ' vs ' + B.length + ' nights)' +
-      (Math.abs(diff) < 0.4 ? ', no clear difference yet.' : diff > 0 ? ', so ' + bText.replace(/ \(.*\)$/, '') + ' have tended to come before heavier days.' : ', so ' + bText.replace(/ \(.*\)$/, '') + ' haven’t been followed by heavier days so far.');
-  };
-  const lines = [];
-  if (nightsB.length >= 3) {
-    const avgBed = nightsB.reduce((t, d) => t + bedMinutes(d.d.bt), 0) / nightsB.length;
-    lines.push('Usual bedtime about ' + clockText(avgBed) + ' (' + nightsB.length + ' nights).' +
-      compare(nightsB.filter((d) => bedMinutes(d.d.bt) < 26 * 60), nightsB.filter((d) => bedMinutes(d.d.bt) >= 27 * 60), 'early nights (bed before 02:00)', 'late nights (after 03:00)'));
-  }
-  if (nightsH.length >= 3) {
-    const avgH = nightsH.reduce((t, d) => t + d.d.sl, 0) / nightsH.length;
-    lines.push('Average ' + avgH.toFixed(1) + ' hours in bed.' +
-      compare(nightsH.filter((d) => d.d.sl >= 7.5), nightsH.filter((d) => d.d.sl < 6), 'long nights (7½ h+)', 'short nights (under 6 h)'));
-  }
-  if (nightsQ.length >= 3) {
-    const qAvg = nightsQ.reduce((t, d) => t + d.d.q, 0) / nightsQ.length;
-    lines.push('Sleep quality averages ' + qAvg.toFixed(1) + '/10.' +
-      compare(nightsQ.filter((d) => d.d.q >= 7), nightsQ.filter((d) => d.d.q <= 5), 'good nights (7+)', 'poor nights (5 or under)'));
-    const dist = nightsQ.filter((d) => typeof d.d.z === 'number');
-    if (dist.length >= 4) lines.push('Disturbed sleep averages ' + (dist.reduce((t, d) => t + d.d.z, 0) / dist.length).toFixed(1) + '/5.');
-  }
-  const text = lines.length ? lines.join(' ') + ' These are patterns in your own logs, not proof of cause.'
-    : 'Not enough nights yet. Bed and Wake check-ins (or saying “went to sleep at 4:30” in a wake note) fill this in.';
   return '<h2 class="tr-h">Sleep</h2>' +
     '<div class="tr-sub">Bedtime</div>' + bedChart() +
     '<div class="tr-sub">Hours in bed</div>' + bars((d) => d.d.sl, 12, 'tr-hoursbar', (v) => v < 6, 'Hours in bed per night', ' h') +
     '<div class="tr-sub">Sleep quality</div>' + bars((d) => d.d.q, 10, 'tr-sleepbar', (v) => v <= 5, 'Sleep quality per night', '/10') +
-    '<p class="tr-detail">' + esc(text) + '</p>';
+    patBtn('sleep', 'Sleep patterns');
+}
+/* Sleep: averages, then the next day's score after early vs late, long vs short, good vs poor nights. */
+function sleepPatterns(T2) {
+  const list = T2.list;
+  const nightsQ = list.filter((d) => typeof d.d.q === 'number');
+  const nightsH = list.filter((d) => typeof d.d.sl === 'number');
+  const nightsB = list.filter((d) => bedMinutes(d.d.bt) !== null);
+  const dist = nightsQ.filter((d) => typeof d.d.z === 'number');
+  const p = { title: 'Sleep patterns', stats: [], comps: [] };
+  if (nightsB.length >= 3) p.stats.push({ label: 'Usual bedtime', value: clockText(mean1(nightsB.map((d) => bedMinutes(d.d.bt)))), sub: nightsB.length + ' nights' });
+  if (nightsH.length >= 3) p.stats.push({ label: 'Hours in bed', value: mean1(nightsH.map((d) => d.d.sl)).toFixed(1), sub: 'average' });
+  if (nightsQ.length >= 3) p.stats.push({ label: 'Sleep quality', value: mean1(nightsQ.map((d) => d.d.q)).toFixed(1) + '/10', sub: 'average' });
+  if (dist.length >= 4) p.stats.push({ label: 'Disturbed', value: mean1(dist.map((d) => d.d.z)).toFixed(1) + '/5', sub: 'average' });
+  const compare = (title, a, b, aLabel, bLabel, bName) => {
+    const A = a.filter((d) => d.load !== null), B = b.filter((d) => d.load !== null);
+    if (A.length < 3 || B.length < 3) return;
+    const ga = avgLoad(A), gb = avgLoad(B), v = nextDayVerdict(ga, gb, bName);
+    p.comps.push({ title, left: { label: aLabel, value: ga.toFixed(1), sub: A.length + ' nights' }, right: { label: bLabel, value: gb.toFixed(1), sub: B.length + ' nights' }, verdict: v.text, tone: v.tone });
+  };
+  compare('Day score after early vs late nights', nightsB.filter((d) => bedMinutes(d.d.bt) < 26 * 60), nightsB.filter((d) => bedMinutes(d.d.bt) >= 27 * 60), 'Bed before 02:00', 'Bed after 03:00', 'late nights');
+  compare('Day score after long vs short nights', nightsH.filter((d) => d.d.sl >= 7.5), nightsH.filter((d) => d.d.sl < 6), '7½ h or more', 'Under 6 h', 'short nights');
+  compare('Day score after good vs poor nights', nightsQ.filter((d) => d.d.q >= 7), nightsQ.filter((d) => d.d.q <= 5), 'Quality 7+', 'Quality 5 or under', 'poor nights');
+  if (!p.stats.length && !p.comps.length) p.empty = 'Not enough nights yet. Bed and Wake check-ins (or saying “went to sleep at 4:30” in a wake note) fill this in.';
+  else p.note = 'Day score = the average of the symptoms you chose at the top (higher = heavier day), on the day after each night.';
+  return p;
 }
 
 function trendsClick(ev) {
@@ -2221,6 +2272,8 @@ function trendsClick(ev) {
     LS.set('trends.inc', TR.inc); trendsRender();
   }
   else if (act === 'sday') { TR.ssel = TR.ssel === v ? null : v; trendsRender(); if (TR.ssel) loadDayDetail(TR.ssel); }
+  else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
+  else if (act === 'pat-close') closePatterns();
   else if (act === 'pair') openSettings('pair');
 }
 
