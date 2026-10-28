@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v10 · 27 Oct';
+const APP_VERSION = 'v11 · 28 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -103,13 +103,14 @@ let view = null, lastMainView = START;
 function showView(v) {
   view = v;
   if (v !== 'settings') lastMainView = v;
-  ['today', 'ahead', 'money', 'log', 'settings'].forEach((name) => { $(name + '-view').hidden = name !== v; });
+  ['today', 'ahead', 'money', 'trends', 'log', 'settings'].forEach((name) => { const el = $(name + '-view'); if (el) el.hidden = name !== v; });
   $('tabbar').hidden = v === 'settings';
   document.querySelectorAll('#tabbar [data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === v ? 'page' : 'false'));
   if (v === 'today') todayEnter();
   else if (v === 'ahead') aheadEnter();
   else if (v === 'money') moneyEnter();
   else if (v === 'log') { logRender(); logMoreRender(); }
+  else if (v === 'trends') trendsEnter();
   else settingsRender();
 }
 document.querySelectorAll('#tabbar [data-tab]').forEach((b) => b.addEventListener('click', () => {
@@ -595,11 +596,14 @@ async function logRefreshConfig() {
   try {
     const res = await api({ action: 'config' });
     if (res && res.success) {
-      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, today: res.today || FALLBACK.today };
+      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, today: res.today || FALLBACK.today };
       LS.set('config', { data: cfg, day: dayKey(new Date()) });
       logRender();
+      if (view === 'trends') trendsRender();
+      return true;
     }
   } catch (e) {}
+  return false;
 }
 
 function logAct(el) {
@@ -1438,6 +1442,191 @@ function celebrateCompletion() {
   reward.hidden = false;
 }
 
+/* ================= TRENDS view =================
+   Symptom history from Health tracker › Events, via the receiver's "config" answer (HealthLog v6).
+   Each health day (04:00 to 04:00) has the highest pain, stiffness, fatigue, brain fog and headache
+   score logged that day; the day's colour is the average of those highs. Read-only. */
+const TREND_SYMS = [
+  { k: 'p', name: 'Pain', color: '#2a78d6', dash: '' },
+  { k: 's', name: 'Stiffness', color: '#1baf7a', dash: '6 3' },
+  { k: 'f', name: 'Fatigue', color: '#d99200', dash: '2 3' },
+  { k: 'g', name: 'Brain fog', color: '#7a68e0', dash: '8 3 2 3' },
+  { k: 'h', name: 'Headache', color: '#e0679a', dash: '1 4' }
+];
+const FLARE_AT = 7;
+const TR = { at: 0, loading: false, sel: null, on: LS.get('trends.on', ['load']) };
+const TRENDS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v16h16"/><path d="m7.5 14.5 3.5-4 3 2.5 5-6"/></svg>';
+
+function trendsEnter() {
+  const el = $('trends-view');
+  if (!el.dataset.built) {
+    el.dataset.built = '1';
+    el.innerHTML = '<div class="top"><span class="eyebrow">LIFE HQ</span><div class="top-actions">' +
+      '<button type="button" class="icon-btn" id="trends-refresh" aria-label="Refresh">' + REFRESH_SVG + '</button>' +
+      '<button type="button" class="icon-btn" id="trends-settings" aria-label="Settings">' + GEAR + '</button></div></div>' +
+      '<h1 class="page-title">Trends</h1><div id="trends-body" aria-live="polite"></div>';
+    $('trends-refresh').onclick = () => trendsLoad();
+    $('trends-settings').onclick = () => openSettings();
+    el.addEventListener('click', trendsClick);
+  }
+  trendsRender();
+  if (Conn.canLog() && (!TR.at || Date.now() - TR.at > 120000)) trendsLoad();
+}
+
+async function trendsLoad() {
+  if (TR.loading || !Conn.canLog()) return;
+  TR.loading = true; TR.at = Date.now(); trendsRender();
+  try { await logRefreshConfig(); } finally { TR.loading = false; trendsRender(); }
+}
+
+function trendsDays() {
+  const sy = cfg.symptoms;
+  if (!sy || !Array.isArray(sy.days) || !sy.startKey) return null;
+  const list = sy.days.map((d, i) => {
+    const have = TREND_SYMS.filter((x) => typeof d[x.k] === 'number');
+    const load = have.length ? have.reduce((a, x) => a + d[x.k], 0) / have.length : null;
+    return { key: addDays(sy.startKey, i), d, load, scores: have.length, flare: load !== null && load >= FLARE_AT };
+  });
+  const by = {};
+  list.forEach((x) => { by[x.key] = x; });
+  return { list, by, today: sy.todayKey || list[list.length - 1].key, marks: Array.isArray(sy.marks) ? sy.marks : [] };
+}
+
+const heatLevel = (l) => (l < 4.5 ? 0 : l < 5.5 ? 1 : l < 6.2 ? 2 : l < 7 ? 3 : 4);
+const shortDate = (k) => keyToDate(k).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const longDate = (k) => keyToDate(k).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const avgLoad = (xs) => { const v = xs.filter((x) => x.load !== null); return v.length ? v.reduce((a, x) => a + x.load, 0) / v.length : null; };
+
+function trendsRender() {
+  const body = $('trends-body');
+  if (!body) return;
+  const T2 = trendsDays();
+  if (!T2) {
+    if (!Conn.canLog()) body.innerHTML = '<div class="notice">Pair this icon once to see your trends.<button type="button" class="log wide" data-tr="pair">Pair this icon</button></div>';
+    else if (TR.loading) body.innerHTML = '<p class="small tr-center">Loading your check-ins…</p>';
+    else body.innerHTML = '<div class="notice">Trends needs the receiver update (HealthLog v6). Once it’s deployed, this page fills in by itself.</div>';
+    return;
+  }
+  const { list, by, today } = T2;
+  const last = (n, end) => list.filter((x) => x.key <= addDays(today, -end) && x.key > addDays(today, -end - n));
+  const flares = last(28, 0).filter((x) => x.flare).length;
+  const wk = avgLoad(last(7, 0)), prev = avgLoad(last(7, 7));
+  let worst = '', worstV = -1;
+  TREND_SYMS.forEach((s) => {
+    const v = last(7, 0).filter((x) => typeof x.d[s.k] === 'number');
+    if (!v.length) return;
+    const m = v.reduce((a, x) => a + x.d[s.k], 0) / v.length;
+    if (m > worstV) { worstV = m; worst = s.name; }
+  });
+  const delta = wk !== null && prev !== null ? wk - prev : null;
+  let html = '<div class="tr-stats">' +
+    '<div class="tr-stat"><span>Flare days</span><b>' + flares + '</b><small>last 4 weeks</small></div>' +
+    '<div class="tr-stat"><span>This week</span><b>' + (wk === null ? '–' : wk.toFixed(1)) + '</b>' +
+      (delta === null ? '' : '<small>' + (Math.abs(delta) < 0.05 ? 'same as' : (delta < 0 ? '↓ ' : '↑ ') + Math.abs(delta).toFixed(1) + ' vs') + ' last week</small>') + '</div>' +
+    '<div class="tr-stat"><span>Highest lately</span><b class="tr-word">' + esc(worst || '–') + '</b>' + (worst ? '<small>avg ' + worstV.toFixed(1) + ' this week</small>' : '') + '</div></div>';
+
+  // Calendar: six Monday-start weeks ending with this week.
+  const end = addDays(today, 6 - ((keyToDate(today).getDay() + 6) % 7));
+  const start = addDays(end, -41);
+  html += '<div class="tr-cal" role="grid" aria-label="Symptom calendar, last six weeks">' +
+    ['', 'M', 'T', 'W', 'T', 'F', 'S', 'S'].map((t) => '<span class="tr-dh">' + t + '</span>').join('');
+  for (let w = 0; w < 6; w++) {
+    const ws = addDays(start, w * 7);
+    html += '<span class="tr-wk">' + esc(shortDate(ws)) + '</span>';
+    for (let i = 0; i < 7; i++) {
+      const k = addDays(ws, i), x = by[k], n = keyToDate(k).getDate();
+      const cls = ['tr-cell'];
+      if (k === today) cls.push('today');
+      if (k === TR.sel) cls.push('sel');
+      if (k > today) { html += '<span class="tr-cell future"></span>'; continue; }
+      if (x && x.load !== null) {
+        cls.push('h' + heatLevel(x.load));
+        html += '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + ', average ' + x.load.toFixed(1) + (x.flare ? ', flare' : '') + '">' +
+          n + (x.flare ? '<i class="tr-flare"></i>' : '') + '</button>';
+      } else {
+        cls.push('empty');
+        html += '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + ', no check-in">' + n + '</button>';
+      }
+    }
+  }
+  html += '</div><div class="tr-key"><span>Lighter</span><span class="tr-ramp"><i class="h0"></i><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i></span><span>Heavier</span>' +
+    '<span><i class="tr-flare inline"></i>Flare</span><span><i class="tr-nodata"></i>No check-in</span></div>';
+
+  // Detail line for the chosen day.
+  const sel = TR.sel && TR.sel <= today ? TR.sel : null;
+  if (sel) {
+    const x = by[sel];
+    html += '<p class="tr-detail"><b>' + esc(longDate(sel)) + '</b> · ' + (x && x.load !== null
+      ? 'average ' + x.load.toFixed(1) + (x.flare ? ' · flare' : '') + ' · ' + TREND_SYMS.filter((s) => typeof x.d[s.k] === 'number').map((s) => s.name.toLowerCase() + ' ' + x.d[s.k]).join(', ') + (x.scores < 3 ? ' · only ' + x.scores + ' of 5 scored' : '')
+      : (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>';
+  } else html += '<p class="tr-detail muted">Tap a day for its highest scores.</p>';
+
+  // Chart chips + chart.
+  const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS);
+  html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
+    '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
+  html += trendsChart(T2);
+  html += '<p class="tr-foot">Each day shows the highest score you logged for each symptom; the colour is their average. A flare is an average of ' + FLARE_AT + ' or more. Days run 04:00 to 04:00.</p>' +
+    fileLinks([['Health tracker', LINKS.healthSheet]]);
+  body.innerHTML = html;
+}
+
+function trendsChart(T2) {
+  const { marks } = T2;
+  // Start the chart at the first logged day (at least the last 14 days) so empty weeks don't squash it.
+  const firstData = T2.list.findIndex((x) => x.load !== null);
+  const list = T2.list.slice(Math.max(0, Math.min(firstData < 0 ? 0 : firstData, T2.list.length - 14)));
+  const W = 360, H = 190, L = 22, R = 8, TOP = 16, B = 22;
+  const n = list.length, cw = W - L - R, ch = H - TOP - B;
+  const X = (i) => L + (n > 1 ? (i * cw) / (n - 1) : 0);
+  const Y = (v) => TOP + ch - (v / 10) * ch;
+  let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Daily symptom scores over the last six weeks">';
+  for (let v = 0; v <= 10; v += 2) svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" class="tr-grid"/><text x="' + (L - 5) + '" y="' + (Y(v) + 3.5) + '" class="tr-ax" text-anchor="end">' + v + '</text>';
+  list.forEach((x, i) => { if ((n - 1 - i) % 7 === 0 && (i > 2 || i === n - 1)) svg += '<text x="' + X(i) + '" y="' + (H - 6) + '" class="tr-ax" text-anchor="' + (i === n - 1 ? 'end' : 'middle') + '">' + esc(shortDate(x.key)) + '</text>'; });
+  marks.forEach((m) => {
+    const i = list.findIndex((x) => x.key === m.key);
+    if (i < 0) return;
+    const right = X(i) > W * 0.55;
+    svg += '<line x1="' + X(i) + '" x2="' + X(i) + '" y1="' + TOP + '" y2="' + (TOP + ch) + '" class="tr-mark"/><text x="' + (X(i) + (right ? -3 : 3)) + '" y="' + (TOP - 4) + '" class="tr-ax" text-anchor="' + (right ? 'end' : 'start') + '">' + esc(m.label) + ' starts</text>';
+  });
+  const path = (get) => {
+    let d = '', pen = false;
+    list.forEach((x, i) => {
+      const v = get(x);
+      if (typeof v !== 'number') { pen = false; return; }
+      d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1);
+      pen = true;
+    });
+    return d;
+  };
+  const dots = (get, cls) => list.map((x, i) => { const v = get(x); return typeof v === 'number' && (i === 0 || typeof get(list[i - 1]) !== 'number') && (i === n - 1 || typeof get(list[i + 1]) !== 'number') ? '<circle cx="' + X(i) + '" cy="' + Y(v) + '" r="2" class="' + cls + '"/>' : ''; }).join('');
+  TREND_SYMS.forEach((s) => {
+    if (!TR.on.includes(s.k)) return;
+    const get = (x) => x.d[s.k];
+    svg += '<path d="' + path(get) + '" fill="none" stroke="' + s.color + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"' + (s.dash ? ' stroke-dasharray="' + s.dash + '"' : '') + '/>' +
+      dots(get, '').replace(/class=""/g, 'fill="' + s.color + '"');
+  });
+  if (TR.on.includes('load')) {
+    const get = (x) => x.load;
+    svg += '<path d="' + path(get) + '" fill="none" class="tr-load"/>' + dots(get, 'tr-loaddot');
+    list.forEach((x, i) => { if (x.flare) svg += '<circle cx="' + X(i) + '" cy="' + Y(x.load) + '" r="3.6" class="tr-flaredot"/>'; });
+  }
+  return svg + '</svg>';
+}
+
+function trendsClick(ev) {
+  const el = ev.target.closest('[data-tr]');
+  if (!el) return;
+  const act = el.dataset.tr, v = el.dataset.v;
+  if (act === 'day') { TR.sel = TR.sel === v ? null : v; trendsRender(); }
+  else if (act === 'series') {
+    TR.on = TR.on.includes(v) ? TR.on.filter((x) => x !== v) : TR.on.concat(v);
+    if (!TR.on.length) TR.on = ['load'];
+    LS.set('trends.on', TR.on); trendsRender();
+  }
+  else if (act === 'pair') openSettings('pair');
+}
+
 /* ================= wiring ================= */
 document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-act]');
@@ -1456,6 +1645,7 @@ document.addEventListener('visibilitychange', () => {
   if (view === 'log') { logRender(); logRefreshConfig(); }
   inboxFlush();
   if ((view === 'ahead' || view === 'money') && Conn.paired()) showView(view);
+  if (view === 'trends') trendsEnter();
   if (view === 'today' && Conn.paired()) {
     if (T.loadedDate && !T.manual && londonWorkingDay(T.rolloverMinutes) !== T.loadedDate) { T.choice = null; loadDay(true); }
     else if (Date.now() - T.lastLoad > 120000) loadDay(false);
