@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v13 · 28 Oct';
+const APP_VERSION = 'v14 · 28 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -715,7 +715,7 @@ document.addEventListener('input', (ev) => {
 /* ================= TODAY view ================= */
 const T = {
   tasks: [], loadedDate: '', rolloverMinutes: 40, choice: null, manual: false, req: 0, lastLoad: 0, built: false,
-  completing: new Set(), pendingLog: null, saving: false, panelReq: {}
+  completing: new Set(), carry: null, carryDone: new Set(), pendingLog: null, saving: false, panelReq: {}
 };
 const TODOIST_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="5" fill="currentColor"/><path d="M5 7.5 9 9.5 19 4.5 M5 12 9 14 19 9 M5 16.5 9 18.5 19 13.5" fill="none" style="stroke:var(--bg)" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 const GPT_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" fill-rule="evenodd"><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>';
@@ -860,6 +860,7 @@ async function loadDay(clear) {
     $('stale').textContent = '';
     message('');
     checkTomorrow();
+    loadCarryOver();
   } catch (e) {
     if (request !== T.req) return;
     $('previous-day').disabled = !T.loadedDate; $('next-day').disabled = !T.loadedDate;
@@ -944,6 +945,7 @@ async function completeTodoist(id, check, row, after) {
     T.req++;                                   // ignore any older day response still in flight
     T.completing.delete(id);
     T.tasks = T.tasks.filter((t) => t.id !== id);
+    T.carryDone.add(id);
     const saved = LS.get('cache.day', null);
     if (saved && saved.result) { saved.result.tasks = (saved.result.tasks || []).filter((t) => t.id !== id); LS.set('cache.day', saved); }
     if (T.built) renderTasks();
@@ -972,6 +974,7 @@ function taskRow(task) {
   label.htmlFor = check.id;
   const name = document.createElement('div');
   name.textContent = task.name;
+  if (task.fromLabel) { const tag = document.createElement('span'); tag.className = 'carry-tag'; tag.textContent = 'from ' + task.fromLabel.replace(/ \d+ \w+$/, ''); tag.title = 'Not done on ' + task.fromLabel; name.appendChild(tag); }
   label.appendChild(name);
   if (task.description) {
     const desc = document.createElement('div');
@@ -987,9 +990,28 @@ function taskRow(task) {
   return row;
 }
 
+/* Unfinished tasks from earlier days show on the normal Today view, tagged "from Tue". Nothing is moved in Todoist. */
+function carriedTasks() {
+  if (!T.carry || T.manual || T.loadedDate !== londonWorkingDay(T.rolloverMinutes)) return [];
+  const have = new Set(T.tasks.map((t) => t.id));
+  return T.carry.filter((t) => !have.has(t.id) && !T.carryDone.has(t.id));
+}
+async function loadCarryOver() {
+  if (!Conn.paired() || T.manual) return;
+  const saved = LS.get('cache.carry', null);
+  if (saved && !T.carry) { T.carry = saved.tasks; renderTasks(); }
+  try {
+    const res = await dash('getCarryOver', []);
+    T.carry = (res && res.tasks) || [];
+    LS.set('cache.carry', { at: Date.now(), tasks: T.carry });
+    renderTasks();
+  } catch (e) {}
+}
+
 function renderTasks() {
   $('focus').replaceChildren(); $('extra').replaceChildren();
-  const core = T.tasks.filter((t) => !t.optional), extra = T.tasks.filter((t) => t.optional);
+  const all = T.tasks.concat(carriedTasks());
+  const core = all.filter((t) => !t.optional), extra = all.filter((t) => t.optional);
   core.forEach((t) => $('focus').appendChild(taskRow(t)));
   extra.forEach((t) => $('extra').appendChild(taskRow(t)));
   if (!core.length) $('focus').textContent = 'Nothing selected for this day.';

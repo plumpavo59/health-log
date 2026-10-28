@@ -399,3 +399,6 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
 .tr-beddot.late{fill:var(--flare)}
 .tr-hoursbar{fill:var(--muted2)}
 .tr-hoursbar.short{fill:var(--flare)}
+
+/* v14: carried-over tasks */
+.carry-tag{display:inline-block;margin-left:8px;font-size:.72rem;color:var(--muted);border:1px solid var(--line2);border-radius:9px;padding:0 6px;vertical-align:2px;white-space:nowrap}
