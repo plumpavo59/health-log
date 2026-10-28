@@ -402,3 +402,11 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
 
 /* v14: carried-over tasks */
 .carry-tag{display:inline-block;margin-left:8px;font-size:.72rem;color:var(--muted);border:1px solid var(--line2);border-radius:9px;padding:0 6px;vertical-align:2px;white-space:nowrap}
+
+/* v15: stomach through the day */
+.tr-part.s0{fill:var(--s0)}.tr-part.s1{fill:var(--s1)}.tr-part.s2{fill:var(--s2)}.tr-part.s3{fill:var(--s3)}.tr-part.s4{fill:var(--s4)}
+.tr-part.yes{fill:none;stroke:var(--s3);stroke-width:1.5;stroke-dasharray:2 1.5}
+.tr-omeline{stroke:var(--ome);stroke-width:2}
+.tr-omeline-key{display:inline-block;width:3px;height:11px;border-radius:1px;background:var(--ome);margin-right:5px;vertical-align:-1px}
+.tr-part-key{display:inline-block;width:11px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.tr-part-key.yes{border:1.5px dashed var(--s3)}

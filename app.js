@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v14 · 28 Oct';
+const APP_VERSION = 'v15 · 28 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -1673,7 +1673,7 @@ function trendsChart(T2) {
   return svg + '</svg>';
 }
 
-/* ---------- Stomach: highest stomach pain or bloating each day, omeprazole days, tap for food ---------- */
+/* ---------- Stomach: average stomach pain each day, omeprazole days, tap for food; then stomach through the day ---------- */
 const stomachLevel = (v) => (v < 1 ? 0 : v < 2.5 ? 1 : v < 4 ? 2 : v < 6 ? 3 : 4);
 /* Bowel marker in the corner: loose (Bristol 6–7) wins over hard (1–2) if both happened. */
 function bowelKind(bx) {
@@ -1688,9 +1688,76 @@ function omeprazoleDays() {
   if (m) (m.counts || []).forEach((n, i) => { if (n) out[addDays(h.startKey, i)] = true; });
   return out;
 }
+/* Stomach pain through the day (HealthLog v9): per day [average, morning, afternoon, evening, night, woke with pain 1/0]. */
+function giData() {
+  const g = cfg.symptoms && cfg.symptoms.gi;
+  if (!g || !Array.isArray(g.days) || !g.startKey) return null;
+  const by = {};
+  g.days.forEach((d, i) => { by[addDays(g.startKey, i)] = d; });
+  return { by, omeStart: g.omeStart || '' };
+}
+const giNum = (v) => typeof v === 'number';
+const GI_PARTS = ['Morning', 'Afternoon', 'Evening', 'Night'];
+function dayPartsView(G, today) {
+  const n = 42, W = 360, L = 58, R = 4, rowH = 13, gap = 3, top = 4;
+  const bw = (W - L - R) / n, H = top + 4 * (rowH + gap) + 12;
+  const first = addDays(today, -(n - 1));
+  let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Stomach pain by time of day, last six weeks">';
+  GI_PARTS.forEach((name, r) => {
+    svg += '<text x="' + (L - 6) + '" y="' + (top + r * (rowH + gap) + rowH - 3) + '" class="tr-ax" text-anchor="end">' + name + '</text>';
+  });
+  for (let i = 0; i < n; i++) {
+    const k = addDays(first, i), d = G.by[k];
+    if (!d) continue;
+    for (let r = 0; r < 4; r++) {
+      let v = d[r + 1], cls = '', label = '';
+      if (giNum(v)) { cls = 's' + stomachLevel(v); label = GI_PARTS[r].toLowerCase() + ' stomach pain ' + v; }
+      else if (r === 0 && d[5] === 1) { cls = 'yes'; label = 'woke with stomach pain (no score)'; }
+      else if (r === 0 && d[5] === 0) { cls = 's0'; label = 'no stomach pain on waking'; }
+      if (!cls) continue;
+      svg += '<rect x="' + (L + i * bw + 0.5).toFixed(1) + '" y="' + (top + r * (rowH + gap)) + '" width="' + Math.max(1.5, bw - 1).toFixed(1) + '" height="' + rowH + '" rx="1.5" class="tr-part ' + cls + '"><title>' + esc(longDate(k)) + ': ' + label + '</title></rect>';
+    }
+  }
+  if (G.omeStart && G.omeStart > first && G.omeStart <= today) {
+    const x = L + Math.round((keyToDate(G.omeStart) - keyToDate(first)) / 86400000) * bw;
+    svg += '<line x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="1" y2="' + (H - 11) + '" class="tr-omeline"/>';
+  }
+  svg += '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(first)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(today)) + '</text></svg>';
+  return '<div class="tr-sub">Through the day</div>' + svg +
+    '<div class="tr-key"><span><i class="tr-omeline-key"></i>Omeprazole started</span><span><i class="tr-part-key yes"></i>Woke with pain, no score</span></div>' +
+    '<p class="tr-detail">' + esc(morningSummary(G, today)) + '</p>';
+}
+/* Mornings before vs since the current omeprazole run (all 120 days the receiver sends). */
+function morningSummary(G, today) {
+  if (!G.omeStart) return 'Morning = from waking to about 1pm. Once omeprazole is logged, this compares mornings before and since.';
+  const S = { b: { n: 0, pain: 0, sc: [], rest: [] }, a: { n: 0, pain: 0, sc: [], rest: [] } };
+  Object.keys(G.by).filter((k) => k <= today).forEach((k) => {
+    const d = G.by[k], s = S[k < G.omeStart ? 'b' : 'a'];
+    if (giNum(d[1]) || d[5] === 1 || d[5] === 0) { s.n++; if ((giNum(d[1]) && d[1] >= 2) || (!giNum(d[1]) && d[5] === 1)) s.pain++; }
+    if (giNum(d[1])) s.sc.push(d[1]);
+    const rest = [d[2], d[3], d[4]].filter(giNum);
+    if (rest.length) s.rest.push(rest.reduce((t, x) => t + x, 0) / rest.length);
+  });
+  const mean = (a) => (a.length ? (a.reduce((t, x) => t + x, 0) / a.length).toFixed(1) : null);
+  const part = (s) => s.pain + ' of ' + s.n + (mean(s.sc) !== null ? ', avg ' + mean(s.sc) : '');
+  if (S.b.n < 3) return 'Morning = waking to about 1pm. Not enough mornings logged before omeprazole (started ' + shortDate(G.omeStart) + ') to compare yet.';
+  if (S.a.n < 3) return 'Morning = waking to about 1pm. Omeprazole started ' + shortDate(G.omeStart) + '; a few more logged mornings and this will compare before and since.';
+  const rb = mean(S.b.rest), ra = mean(S.a.rest);
+  return 'Mornings with stomach pain (2+, or a note saying so): before omeprazole ' + part(S.b) + '; since ' + shortDate(G.omeStart) + ' ' + part(S.a) + '.' +
+    (rb !== null && ra !== null ? ' Rest of the day: ' + rb + ' before, ' + ra + ' since.' : '') +
+    ' Logged mornings only (waking to about 1pm); patterns, not proof.';
+}
 function stomachView(T2) {
   const { by, today } = T2;
   const ome = omeprazoleDays();
+  const G = giData();
+  // Colour: the day's average stomach pain (HealthLog v9); before that update, the highest stomach or bloating score.
+  const dayScore = (k, d) => {
+    const g = G && G.by[k];
+    if (g && giNum(g[0])) return g[0];
+    const v = [d.st, d.b].filter(giNum);
+    return v.length ? Math.max.apply(null, v) : null;
+  };
   const end = addDays(today, 6 - ((keyToDate(today).getDay() + 6) % 7));
   const start = addDays(end, -41);
   let html = '<h2 class="tr-h">Stomach</h2><div class="tr-cal" aria-label="Stomach calendar, last six weeks">' +
@@ -1702,22 +1769,27 @@ function stomachView(T2) {
       const k = addDays(ws, i), x = by[k], n = keyToDate(k).getDate();
       if (k > today) { html += '<span class="tr-cell future"></span>'; continue; }
       const d = x ? x.d : {};
-      const v = [d.st, d.b].filter((y) => typeof y === 'number');
+      const sc = dayScore(k, d);
       const cls = ['tr-cell'];
       if (k === today) cls.push('today');
       if (k === TR.ssel) cls.push('sel');
-      cls.push(v.length ? 's' + stomachLevel(Math.max.apply(null, v)) : 'empty');
+      cls.push(sc !== null ? 's' + stomachLevel(sc) : 'empty');
       html += '<button type="button" class="' + cls.join(' ') + '" data-tr="sday" data-v="' + k + '" aria-label="' + esc(longDate(k)) +
-        (v.length ? ', stomach ' + Math.max.apply(null, v) : ', no stomach score') + (ome[k] ? ', omeprazole taken' : '') + bowelLabel(d.bx) + '">' + n + (ome[k] ? '<i class="tr-ome"></i>' : '') + bowelMark(d.bx) + '</button>';
+        (sc !== null ? ', stomach ' + sc : ', no stomach score') + (ome[k] ? ', omeprazole taken' : '') + bowelLabel(d.bx) + '">' + n + (ome[k] ? '<i class="tr-ome"></i>' : '') + bowelMark(d.bx) + '</button>';
     }
   }
   html += '</div><div class="tr-key"><span>Calm</span><span class="tr-ramp"><i class="s0"></i><i class="s1"></i><i class="s2"></i><i class="s3"></i><i class="s4"></i></span><span>Bad</span>' +
-    '<span><i class="tr-ome inline"></i>Omeprazole</span><span><i class="tr-bm loose inline"></i>Loose (6–7)</span><span><i class="tr-bm hard inline"></i>Hard (1–2)</span></div>';
+    '<span><i class="tr-ome inline"></i>Omeprazole</span><span><i class="tr-bm loose inline"></i>Loose (6–7)</span><span><i class="tr-bm hard inline"></i>Hard (1–2)</span></div>' +
+    (G ? '<p class="tr-detail muted" style="margin-top:4px">Colour = the day’s average stomach pain.</p>' : '');
   const k = TR.ssel && TR.ssel <= today ? TR.ssel : null;
-  if (!k) return html + '<p class="tr-detail muted">Tap a day to see what you ate.</p>';
+  const parts = G ? dayPartsView(G, today) : '';
+  if (!k) return html + '<p class="tr-detail muted">Tap a day to see what you ate.</p>' + parts;
   const d = (by[k] || {}).d || {};
-  const head = '<b>' + esc(longDate(k)) + '</b>' + (typeof d.st === 'number' || typeof d.b === 'number'
-    ? ' · ' + [typeof d.st === 'number' ? 'stomach pain ' + d.st : '', typeof d.b === 'number' ? 'bloating ' + d.b : ''].filter(Boolean).join(', ') : '') + (ome[k] ? ' · omeprazole' : '');
+  const g = G && G.by[k];
+  const when = g ? GI_PARTS.map((name, i) => (giNum(g[i + 1]) ? name.toLowerCase() + ' ' + g[i + 1] : '')).filter(Boolean).join(', ') : '';
+  const bits = [g && giNum(g[0]) ? 'stomach pain avg ' + g[0] + (when ? ' (' + when + ')' : '') : giNum(d.st) ? 'stomach pain up to ' + d.st : '',
+    giNum(d.b) ? 'bloating up to ' + d.b : '', g && !giNum(g[1]) && g[5] === 1 ? 'woke with stomach pain' : ''].filter(Boolean);
+  const head = '<b>' + esc(longDate(k)) + '</b>' + (bits.length ? ' · ' + esc(bits.join(', ')) : '') + (ome[k] ? ' · omeprazole' : '');
   const det = TR.days[k];
   let body = '';
   if (!det) body = '<p class="small">Loading…</p>';
@@ -1727,7 +1799,7 @@ function stomachView(T2) {
     body = list('Food', det.meals || []) + list('Bowel', det.bowel || []) + list('Medicines', det.meds || []) + list('Stomach scores', det.stomach || []);
     if (!body) body = '<p class="small">Nothing logged that day.</p>';
   }
-  return html + '<div class="tr-day"><p class="tr-detail" style="margin:10px 0 6px">' + head + '</p>' + body + '</div>';
+  return html + '<div class="tr-day"><p class="tr-detail" style="margin:10px 0 6px">' + head + '</p>' + body + '</div>' + parts;
 }
 async function loadDayDetail(k) {
   if (TR.days[k] && !TR.days[k].error) return;
