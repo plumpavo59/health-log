@@ -381,3 +381,21 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
   .tv .budget-metric-label{font-size:.68rem;margin-bottom:4px}
   .tv .budget-result{font-size:.88rem;line-height:1.35}
 }
+
+/* v13: Later options, bowel markers, sleep charts */
+.task-actions{display:flex;gap:5px;align-self:start}
+.later-opts{grid-column:1/-1;display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;padding:2px 0 4px}
+.move-today[aria-expanded=true]{border-color:var(--ink);color:var(--ink)}
+.tr-cell{position:relative}
+.tr-bm{position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%}
+.tr-bm.loose{background:#c47a00}
+.tr-bm.hard{background:#6b4a2b;border:1px solid var(--bg)}
+:root[data-theme=dark] .tr-bm.loose{background:#ffb84d}
+:root[data-theme=dark] .tr-bm.hard{background:#c8a27c}
+.tr-bm.inline{position:static;display:inline-block;margin-right:5px}
+.tr-sub{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:12px 0 2px}
+.tr-bedline{stroke:var(--line2);stroke-width:1;stroke-dasharray:2 3}
+.tr-beddot{fill:var(--ink)}
+.tr-beddot.late{fill:var(--flare)}
+.tr-hoursbar{fill:var(--muted2)}
+.tr-hoursbar.short{fill:var(--flare)}

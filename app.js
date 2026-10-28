@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v12 · 28 Oct';
+const APP_VERSION = 'v13 · 28 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -246,7 +246,7 @@ async function settingsAct(el) {
 const FALLBACK = {
   meds: [{ name: 'Celecoxib', strength: '200 mg', perDay: 2 }, { name: 'Omeprazole', strength: '20 mg', perDay: 1 },
     { name: 'Elvanse', strength: '30 mg', perDay: 1 }, { name: 'Amitriptyline', strength: '10 mg', perDay: 1 },
-    { name: 'Symprove', strength: '70 ml', perDay: 1 }],
+    { name: 'Probiotic', strength: '70 ml', perDay: 1 }],
   foods: ['Green apple', 'Dark chocolate', 'Cashews', 'Onigiri', 'Samosa', 'Coffee with oat milk', 'Chai with oat milk'],
   trial: null, today: { meds: {}, wakeAt: '', lastCheckin: '' }
 };
@@ -535,9 +535,18 @@ function updateCheckButton() {
 
 function saveLocal() { LS.set('recent', recent.slice(0, 40)); LS.set('queue', queue); }
 
+/* A time picked in the open time panel counts even if "Use this time" wasn't pressed. */
+function pickedTime() {
+  const el = $('time-input');
+  if (!S.timeOpen || !el || !el.value) return null;
+  const d = new Date(el.value);
+  return !isNaN(d) && d.getTime() <= Date.now() + 10 * 60000 && d.getTime() >= Date.now() - 3 * 86400000 && Math.abs(d - Date.now()) > 60000 ? d : null;
+}
+
 function commit(kind, payload, label, extra) {
-  const when = S.time || new Date();
-  const entry = Object.assign({ kind, entryId: newId(), time: when.toISOString(), timeSet: !!S.time }, payload);
+  const when = S.time || pickedTime() || new Date();
+  const timeSet = !!(S.time || pickedTime());
+  const entry = Object.assign({ kind, entryId: newId(), time: when.toISOString(), timeSet }, payload);
   recent.unshift(Object.assign({ id: entry.entryId, day: dayKey(when), hday: healthKey(when), hm: hm(when), text: label, kind, status: 'pending' }, extra || {}));
   S.time = null; S.timeOpen = false;
   saveLocal();
@@ -680,6 +689,13 @@ function logAct(el) {
     commit('trial', {}, t.button.replace(/ now$/i, ''));
   }
 }
+
+document.addEventListener('change', (ev) => {
+  if (ev.target.id !== 'time-input') return;
+  const d = ev.target.value ? new Date(ev.target.value) : null;
+  if (d && !isNaN(d) && d.getTime() <= Date.now() + 10 * 60000 && d.getTime() >= Date.now() - 3 * 86400000) { S.time = d; S.timeOpen = false; logRender(); toast('Next entry will be logged at ' + hm(d)); }
+  else if (d) toast('Pick a time in the last 3 days');
+});
 
 document.addEventListener('input', (ev) => {
   const el = ev.target;
@@ -1116,24 +1132,42 @@ function pageEnter(name, title, panelId, after, load, stampKey) {
 function aheadEnter() { pageEnter('ahead', 'Ahead', 'next-days', '<section id="optional-week" class="optional-week" aria-live="polite"></section>', loadAhead, 'aheadAt'); }
 function loadAhead() { loadNextFewDays(); loadOptionalWeek(); }
 
-/* "Today" button: moves a Todoist task to today (recurring tasks are refused by the server). */
-function todayButton(id, title) {
-  const b = document.createElement('button');
-  b.type = 'button'; b.className = 'move-today'; b.textContent = 'Today';
-  b.setAttribute('aria-label', 'Move ' + title + ' to today');
-  b.onclick = async () => {
-    b.disabled = true; b.textContent = 'Moving…';
+/* Task buttons on Ahead: "Today" moves it to today; "Later" offers +1 day, +3 days or next week.
+   Recurring tasks are refused by the server so their repeat isn't lost. */
+function taskActions(id, title, row) {
+  const box = document.createElement('div'); box.className = 'task-actions';
+  const today = document.createElement('button'); today.type = 'button'; today.className = 'move-today'; today.textContent = 'Today';
+  today.setAttribute('aria-label', 'Move ' + title + ' to today');
+  const later = document.createElement('button'); later.type = 'button'; later.className = 'move-today'; later.textContent = 'Later';
+  later.setAttribute('aria-label', 'Push ' + title + ' back'); later.setAttribute('aria-expanded', 'false');
+  const run = async (btn, fn, args, done) => {
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = '…';
     try {
-      await dash('moveTaskToToday', [id]);
-      toast('Moved to today ✓');
+      const res = await dash(fn, args);
+      toast(done(res));
       LS.del('cache.day'); T.lastLoad = 0;
       loadAhead();
     } catch (e) {
-      b.disabled = false; b.textContent = 'Today';
-      toast(/not a function/i.test(e.message) ? 'Needs the Optional-tasks file in the Life Dashboard script.' : e.message);
+      btn.disabled = false; btn.textContent = label;
+      toast(/not a function/i.test(e.message) ? 'Needs the latest Optional-tasks file in the Life Dashboard script.' : e.message);
     }
   };
-  return b;
+  today.onclick = () => run(today, 'moveTaskToToday', [id], () => 'Moved to today ✓');
+  later.onclick = () => {
+    const open = row.querySelector('.later-opts');
+    if (open) { open.remove(); later.setAttribute('aria-expanded', 'false'); return; }
+    later.setAttribute('aria-expanded', 'true');
+    const opts = document.createElement('div'); opts.className = 'later-opts';
+    [['plus1', '+1 day'], ['plus3', '+3 days'], ['nextweek', 'Next week']].forEach(([how, text]) => {
+      const o = document.createElement('button'); o.type = 'button'; o.className = 'move-today'; o.textContent = text;
+      o.onclick = () => run(o, 'rescheduleTask', [id, how], (res) => 'Moved to ' + keyToDate(res.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ✓');
+      opts.appendChild(o);
+    });
+    row.appendChild(opts);
+  };
+  box.append(today, later);
+  return box;
 }
 
 function loadOptionalWeek() {
@@ -1157,7 +1191,7 @@ function loadOptionalWeek() {
       const bits = [t.time, t.duration ? t.duration + ' min' : '', t.recurring ? 'repeats' : ''].filter(Boolean);
       if (bits.length) { const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = bits.join(' · '); content.appendChild(sub); }
       row.append(check, content);
-      if (!t.recurring) row.appendChild(todayButton(t.id, t.title));
+      if (!t.recurring) row.appendChild(taskActions(t.id, t.title, row));
       panel.appendChild(row);
     });
   }, 'Loading optional tasks…');
@@ -1199,7 +1233,7 @@ function loadNextFewDays() {
           }
           if (calendar || item.time) row.append(time, content);
           else { row.classList.add('ahead-no-time'); row.appendChild(content); }
-          if (!calendar) row.appendChild(todayButton(item.id || decodeURIComponent(String(item.url || '').split('/').pop()), item.title));
+          if (!calendar) row.appendChild(taskActions(item.id || decodeURIComponent(String(item.url || '').split('/').pop()), item.title, row));
           block.appendChild(row);
         });
       };
@@ -1619,6 +1653,13 @@ function trendsChart(T2) {
 
 /* ---------- Stomach: highest stomach pain or bloating each day, omeprazole days, tap for food ---------- */
 const stomachLevel = (v) => (v < 1 ? 0 : v < 2.5 ? 1 : v < 4 ? 2 : v < 6 ? 3 : 4);
+/* Bowel marker in the corner: loose (Bristol 6–7) wins over hard (1–2) if both happened. */
+function bowelKind(bx) {
+  if (!Array.isArray(bx) || !bx.length) return '';
+  return bx.some((t) => t >= 6) ? 'loose' : bx.some((t) => t <= 2) ? 'hard' : '';
+}
+const bowelMark = (bx) => (bowelKind(bx) ? '<i class="tr-bm ' + bowelKind(bx) + '"></i>' : '');
+const bowelLabel = (bx) => (Array.isArray(bx) && bx.length ? ', Bristol ' + bx.join(', ') : '');
 function omeprazoleDays() {
   const h = cfg.history, out = {};
   const m = h && Array.isArray(h.meds) ? h.meds.find((x) => /omeprazole/i.test(x.name)) : null;
@@ -1645,11 +1686,11 @@ function stomachView(T2) {
       if (k === TR.ssel) cls.push('sel');
       cls.push(v.length ? 's' + stomachLevel(Math.max.apply(null, v)) : 'empty');
       html += '<button type="button" class="' + cls.join(' ') + '" data-tr="sday" data-v="' + k + '" aria-label="' + esc(longDate(k)) +
-        (v.length ? ', stomach ' + Math.max.apply(null, v) : ', no stomach score') + (ome[k] ? ', omeprazole taken' : '') + '">' + n + (ome[k] ? '<i class="tr-ome"></i>' : '') + '</button>';
+        (v.length ? ', stomach ' + Math.max.apply(null, v) : ', no stomach score') + (ome[k] ? ', omeprazole taken' : '') + bowelLabel(d.bx) + '">' + n + (ome[k] ? '<i class="tr-ome"></i>' : '') + bowelMark(d.bx) + '</button>';
     }
   }
   html += '</div><div class="tr-key"><span>Calm</span><span class="tr-ramp"><i class="s0"></i><i class="s1"></i><i class="s2"></i><i class="s3"></i><i class="s4"></i></span><span>Bad</span>' +
-    '<span><i class="tr-ome inline"></i>Omeprazole taken</span></div>';
+    '<span><i class="tr-ome inline"></i>Omeprazole</span><span><i class="tr-bm loose inline"></i>Loose (6–7)</span><span><i class="tr-bm hard inline"></i>Hard (1–2)</span></div>';
   const k = TR.ssel && TR.ssel <= today ? TR.ssel : null;
   if (!k) return html + '<p class="tr-detail muted">Tap a day to see what you ate.</p>';
   const d = (by[k] || {}).d || {};
@@ -1676,36 +1717,77 @@ async function loadDayDetail(k) {
   if (view === 'trends') trendsRender();
 }
 
-/* ---------- Sleep: quality from wake check-ins, and how days compare after better or worse nights ---------- */
+/* ---------- Sleep: quality, hours slept and bedtime (from wake and bed check-ins), and how days compare ---------- */
+const bedMinutes = (bt) => { const m = /^(\d{2}):(\d{2})$/.exec(bt || ''); if (!m) return null; const v = Number(m[1]) * 60 + Number(m[2]); return v < 12 * 60 ? v + 1440 : v; };
+const clockText = (mins) => { const v = Math.round(mins) % 1440; return pad(Math.floor(v / 60)) + ':' + pad(v % 60); };
 function sleepView(T2) {
-  const nights = T2.list.filter((x) => typeof x.d.q === 'number');
-  const W = 360, H = 70, L = 4, R = 4, n = T2.list.length, bw = (W - L - R) / n;
-  let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Sleep quality per night, last six weeks">' +
-    '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + (H - 12) + '" y2="' + (H - 12) + '" class="tr-grid"/>';
-  T2.list.forEach((x, i) => {
-    if (typeof x.d.q !== 'number') return;
-    const h = Math.max(2, (x.d.q / 10) * (H - 16));
-    svg += '<rect x="' + (L + i * bw + 1).toFixed(1) + '" y="' + (H - 12 - h).toFixed(1) + '" width="' + Math.max(2, bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.5" class="tr-sleepbar' + (x.d.q <= 5 ? ' poor' : '') + '"><title>' + esc(longDate(x.key)) + ': ' + x.d.q + '/10</title></rect>';
-  });
-  svg += '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(T2.list[0].key)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(T2.list[n - 1].key)) + '</text></svg>';
-  let text;
-  if (nights.length < 6) {
-    text = 'Only ' + nights.length + ' night' + (nights.length === 1 ? '' : 's') + ' with a sleep-quality score so far. Rate sleep in the Wake check-in and this will start to show how your nights and days line up.';
-  } else {
-    const good = nights.filter((x) => x.d.q >= 7 && x.load !== null), poor = nights.filter((x) => x.d.q <= 5 && x.load !== null);
-    const qAvg = nights.reduce((a, x) => a + x.d.q, 0) / nights.length;
-    text = 'Average sleep quality ' + qAvg.toFixed(1) + '/10 over ' + nights.length + ' nights. ';
-    if (good.length >= 3 && poor.length >= 3) {
-      const g = avgLoad(good), p = avgLoad(poor);
-      const diff = p - g;
-      text += 'Days after nights you rated 7+ averaged ' + g.toFixed(1) + '; after 5 or under, ' + p.toFixed(1) + ' (' + good.length + ' vs ' + poor.length + ' nights). ' +
-        (Math.abs(diff) < 0.4 ? 'So far that’s no clear difference.' : diff > 0 ? 'Poorer nights have tended to come before heavier days.' : 'Poorer nights haven’t been followed by heavier days so far.');
-    } else text += 'Not enough good and poor nights yet to compare them with how the next day went.';
-    const dist = nights.filter((x) => typeof x.d.z === 'number');
-    if (dist.length >= 4) text += ' Disturbed sleep averages ' + (dist.reduce((a, x) => a + x.d.z, 0) / dist.length).toFixed(1) + '/5.';
-    text += ' This is a pattern in your own logs, not proof of cause.';
+  const list = T2.list, n = list.length;
+  const W = 360, L = 30, R = 4, bw = (W - L - R) / n;
+  const x = (i) => L + i * bw;
+  const axis = (H) => '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(list[0].key)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(list[n - 1].key)) + '</text>';
+  const bars = (get, max, cls, bad, label, unit) => {
+    const H = 64, base = H - 12, top = 4;
+    let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + label + '">' +
+      '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + base + '" y2="' + base + '" class="tr-grid"/>' +
+      '<text x="' + (L - 4) + '" y="' + (top + 6) + '" class="tr-ax" text-anchor="end">' + max + '</text>';
+    list.forEach((d, i) => {
+      const v = get(d);
+      if (typeof v !== 'number') return;
+      const h = Math.max(2, (Math.min(v, max) / max) * (base - top));
+      svg += '<rect x="' + (x(i) + 1).toFixed(1) + '" y="' + (base - h).toFixed(1) + '" width="' + Math.max(2, bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.5" class="' + cls + (bad(v) ? ' ' + (cls === 'tr-sleepbar' ? 'poor' : 'short') : '') + '"><title>' + esc(longDate(d.key)) + ': ' + v + unit + '</title></rect>';
+    });
+    return svg + axis(H) + '</svg>';
+  };
+  // Bedtime: 21:00 at the top down to 08:00 at the bottom.
+  const bedChart = () => {
+    const H = 78, top = 6, base = H - 12, lo = 21 * 60, hi = 32 * 60;
+    const y = (m) => top + ((Math.min(Math.max(m, lo), hi) - lo) / (hi - lo)) * (base - top);
+    let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Bedtime per night">';
+    [[24 * 60, '00:00'], [27 * 60, '03:00'], [30 * 60, '06:00']].forEach(([m, t]) => {
+      svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(m).toFixed(1) + '" y2="' + y(m).toFixed(1) + '" class="tr-bedline"/><text x="' + (L - 4) + '" y="' + (y(m) + 3).toFixed(1) + '" class="tr-ax" text-anchor="end">' + t + '</text>';
+    });
+    list.forEach((d, i) => {
+      const m = bedMinutes(d.d.bt);
+      if (m === null) return;
+      svg += '<circle cx="' + (x(i) + bw / 2).toFixed(1) + '" cy="' + y(m).toFixed(1) + '" r="3" class="tr-beddot' + (m >= 27 * 60 ? ' late' : '') + '"><title>' + esc(longDate(d.key)) + ': bed ' + d.d.bt + '</title></circle>';
+    });
+    return svg + axis(H) + '</svg>';
+  };
+  const nightsQ = list.filter((d) => typeof d.d.q === 'number');
+  const nightsH = list.filter((d) => typeof d.d.sl === 'number');
+  const nightsB = list.filter((d) => bedMinutes(d.d.bt) !== null);
+  const compare = (a, b, aText, bText) => {
+    const A = a.filter((d) => d.load !== null), B = b.filter((d) => d.load !== null);
+    if (A.length < 3 || B.length < 3) return '';
+    const ga = avgLoad(A), gb = avgLoad(B), diff = gb - ga;
+    return ' Days after ' + aText + ' averaged ' + ga.toFixed(1) + '; after ' + bText + ', ' + gb.toFixed(1) + ' (' + A.length + ' vs ' + B.length + ' nights)' +
+      (Math.abs(diff) < 0.4 ? ', no clear difference yet.' : diff > 0 ? ', so ' + bText.replace(/ \(.*\)$/, '') + ' have tended to come before heavier days.' : ', so ' + bText.replace(/ \(.*\)$/, '') + ' haven’t been followed by heavier days so far.');
+  };
+  const lines = [];
+  if (nightsB.length >= 3) {
+    const avgBed = nightsB.reduce((t, d) => t + bedMinutes(d.d.bt), 0) / nightsB.length;
+    lines.push('Usual bedtime about ' + clockText(avgBed) + ' (' + nightsB.length + ' nights).' +
+      compare(nightsB.filter((d) => bedMinutes(d.d.bt) < 26 * 60), nightsB.filter((d) => bedMinutes(d.d.bt) >= 27 * 60), 'early nights (bed before 02:00)', 'late nights (after 03:00)'));
   }
-  return '<h2 class="tr-h">Sleep</h2>' + svg + '<p class="tr-detail">' + esc(text) + '</p>';
+  if (nightsH.length >= 3) {
+    const avgH = nightsH.reduce((t, d) => t + d.d.sl, 0) / nightsH.length;
+    lines.push('Average ' + avgH.toFixed(1) + ' hours in bed.' +
+      compare(nightsH.filter((d) => d.d.sl >= 7.5), nightsH.filter((d) => d.d.sl < 6), 'long nights (7½ h+)', 'short nights (under 6 h)'));
+  }
+  if (nightsQ.length >= 3) {
+    const qAvg = nightsQ.reduce((t, d) => t + d.d.q, 0) / nightsQ.length;
+    lines.push('Sleep quality averages ' + qAvg.toFixed(1) + '/10.' +
+      compare(nightsQ.filter((d) => d.d.q >= 7), nightsQ.filter((d) => d.d.q <= 5), 'good nights (7+)', 'poor nights (5 or under)'));
+    const dist = nightsQ.filter((d) => typeof d.d.z === 'number');
+    if (dist.length >= 4) lines.push('Disturbed sleep averages ' + (dist.reduce((t, d) => t + d.d.z, 0) / dist.length).toFixed(1) + '/5.');
+  }
+  const text = lines.length ? lines.join(' ') + ' These are patterns in your own logs, not proof of cause.'
+    : 'Not enough nights yet. Bed and Wake check-ins (or saying “went to sleep at 4:30” in a wake note) fill this in.';
+  return '<h2 class="tr-h">Sleep</h2>' +
+    '<div class="tr-sub">Bedtime</div>' + bedChart() +
+    '<div class="tr-sub">Hours in bed</div>' + bars((d) => d.d.sl, 12, 'tr-hoursbar', (v) => v < 6, 'Hours in bed per night', ' h') +
+    '<div class="tr-sub">Sleep quality</div>' + bars((d) => d.d.q, 10, 'tr-sleepbar', (v) => v <= 5, 'Sleep quality per night', '/10') +
+    '<p class="tr-detail">' + esc(text) + '</p>';
 }
 
 function trendsClick(ev) {
