@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v11 · 28 Oct';
+const APP_VERSION = 'v12 · 28 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -1176,7 +1176,6 @@ function loadNextFewDays() {
       const heading = document.createElement('h3'); heading.textContent = day.label; block.appendChild(heading);
       const group = (label, items, calendar) => {
         if (!items.length) return;
-        const title = document.createElement('h4'); title.textContent = label; block.appendChild(title);
         items.forEach((item) => {
           const row = document.createElement('div'); row.className = 'ahead-row';
           const time = document.createElement('span'); time.className = 'ahead-time'; time.textContent = item.time || '';
@@ -1186,6 +1185,7 @@ function loadNextFewDays() {
           else name = document.createElement('span');
           name.textContent = item.title;
           content.appendChild(name);
+          if (label === 'Deadlines') { const tag = document.createElement('span'); tag.className = 'deadline-tag'; tag.textContent = 'deadline'; content.appendChild(tag); }
           if (calendar && item.location) { const place = document.createElement('div'); place.className = 'sub'; place.textContent = item.location; content.appendChild(place); }
           if (!calendar) {
             row.classList.add('ahead-task');
@@ -1454,7 +1454,8 @@ const TREND_SYMS = [
   { k: 'h', name: 'Headache', color: '#e0679a', dash: '1 4' }
 ];
 const FLARE_AT = 7;
-const TR = { at: 0, loading: false, sel: null, on: LS.get('trends.on', ['load']) };
+const TR = { at: 0, loading: false, sel: null, ssel: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f', 'g', 'h']), days: {} };
+const incSyms = () => TREND_SYMS.filter((x) => TR.inc.includes(x.k));
 const TRENDS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v16h16"/><path d="m7.5 14.5 3.5-4 3 2.5 5-6"/></svg>';
 
 function trendsEnter() {
@@ -1483,7 +1484,7 @@ function trendsDays() {
   const sy = cfg.symptoms;
   if (!sy || !Array.isArray(sy.days) || !sy.startKey) return null;
   const list = sy.days.map((d, i) => {
-    const have = TREND_SYMS.filter((x) => typeof d[x.k] === 'number');
+    const have = incSyms().filter((x) => typeof d[x.k] === 'number');
     const load = have.length ? have.reduce((a, x) => a + d[x.k], 0) / have.length : null;
     return { key: addDays(sy.startKey, i), d, load, scores: have.length, flare: load !== null && load >= FLARE_AT };
   });
@@ -1525,6 +1526,7 @@ function trendsRender() {
       (delta === null ? '' : '<small>' + (Math.abs(delta) < 0.05 ? 'same as' : (delta < 0 ? '↓ ' : '↑ ') + Math.abs(delta).toFixed(1) + ' vs') + ' last week</small>') + '</div>' +
     '<div class="tr-stat"><span>Highest lately</span><b class="tr-word">' + esc(worst || '–') + '</b>' + (worst ? '<small>avg ' + worstV.toFixed(1) + ' this week</small>' : '') + '</div></div>';
 
+  html += '<div class="tr-inc"><span>Flare days count</span>' + TREND_SYMS.map((x) => '<button type="button" class="tr-chip" data-tr="inc" data-v="' + x.k + '" aria-pressed="' + TR.inc.includes(x.k) + '">' + esc(x.name) + '</button>').join('') + '</div>';
   // Calendar: six Monday-start weeks ending with this week.
   const end = addDays(today, 6 - ((keyToDate(today).getDay() + 6) % 7));
   const start = addDays(end, -41);
@@ -1566,7 +1568,8 @@ function trendsRender() {
   html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
   html += trendsChart(T2);
-  html += '<p class="tr-foot">Each day shows the highest score you logged for each symptom; the colour is their average. A flare is an average of ' + FLARE_AT + ' or more. Days run 04:00 to 04:00.</p>' +
+  html += stomachView(T2) + sleepView(T2);
+  html += '<p class="tr-foot">Each day shows the highest score you logged for each symptom; the colour is the average of the ones you’ve chosen to count. A flare is an average of ' + FLARE_AT + ' or more. Days run 04:00 to 04:00.</p>' +
     fileLinks([['Health tracker', LINKS.healthSheet]]);
   body.innerHTML = html;
 }
@@ -1614,6 +1617,97 @@ function trendsChart(T2) {
   return svg + '</svg>';
 }
 
+/* ---------- Stomach: highest stomach pain or bloating each day, omeprazole days, tap for food ---------- */
+const stomachLevel = (v) => (v < 1 ? 0 : v < 2.5 ? 1 : v < 4 ? 2 : v < 6 ? 3 : 4);
+function omeprazoleDays() {
+  const h = cfg.history, out = {};
+  const m = h && Array.isArray(h.meds) ? h.meds.find((x) => /omeprazole/i.test(x.name)) : null;
+  if (m) (m.counts || []).forEach((n, i) => { if (n) out[addDays(h.startKey, i)] = true; });
+  return out;
+}
+function stomachView(T2) {
+  const { by, today } = T2;
+  const ome = omeprazoleDays();
+  const end = addDays(today, 6 - ((keyToDate(today).getDay() + 6) % 7));
+  const start = addDays(end, -41);
+  let html = '<h2 class="tr-h">Stomach</h2><div class="tr-cal" aria-label="Stomach calendar, last six weeks">' +
+    ['', 'M', 'T', 'W', 'T', 'F', 'S', 'S'].map((t) => '<span class="tr-dh">' + t + '</span>').join('');
+  for (let w = 0; w < 6; w++) {
+    const ws = addDays(start, w * 7);
+    html += '<span class="tr-wk">' + esc(shortDate(ws)) + '</span>';
+    for (let i = 0; i < 7; i++) {
+      const k = addDays(ws, i), x = by[k], n = keyToDate(k).getDate();
+      if (k > today) { html += '<span class="tr-cell future"></span>'; continue; }
+      const d = x ? x.d : {};
+      const v = [d.st, d.b].filter((y) => typeof y === 'number');
+      const cls = ['tr-cell'];
+      if (k === today) cls.push('today');
+      if (k === TR.ssel) cls.push('sel');
+      cls.push(v.length ? 's' + stomachLevel(Math.max.apply(null, v)) : 'empty');
+      html += '<button type="button" class="' + cls.join(' ') + '" data-tr="sday" data-v="' + k + '" aria-label="' + esc(longDate(k)) +
+        (v.length ? ', stomach ' + Math.max.apply(null, v) : ', no stomach score') + (ome[k] ? ', omeprazole taken' : '') + '">' + n + (ome[k] ? '<i class="tr-ome"></i>' : '') + '</button>';
+    }
+  }
+  html += '</div><div class="tr-key"><span>Calm</span><span class="tr-ramp"><i class="s0"></i><i class="s1"></i><i class="s2"></i><i class="s3"></i><i class="s4"></i></span><span>Bad</span>' +
+    '<span><i class="tr-ome inline"></i>Omeprazole taken</span></div>';
+  const k = TR.ssel && TR.ssel <= today ? TR.ssel : null;
+  if (!k) return html + '<p class="tr-detail muted">Tap a day to see what you ate.</p>';
+  const d = (by[k] || {}).d || {};
+  const head = '<b>' + esc(longDate(k)) + '</b>' + (typeof d.st === 'number' || typeof d.b === 'number'
+    ? ' · ' + [typeof d.st === 'number' ? 'stomach pain ' + d.st : '', typeof d.b === 'number' ? 'bloating ' + d.b : ''].filter(Boolean).join(', ') : '') + (ome[k] ? ' · omeprazole' : '');
+  const det = TR.days[k];
+  let body = '';
+  if (!det) body = '<p class="small">Loading…</p>';
+  else if (det.error) body = '<p class="small">' + esc(det.error) + '</p>';
+  else {
+    const list = (title, items) => items.length ? '<div class="tr-day-h">' + title + '</div>' + items.map((x) => '<div class="tr-day-row"><span>' + esc(x.time || '–') + '</span><span>' + esc(x.text) + '</span></div>').join('') : '';
+    body = list('Food', det.meals || []) + list('Bowel', det.bowel || []) + list('Medicines', det.meds || []) + list('Stomach scores', det.stomach || []);
+    if (!body) body = '<p class="small">Nothing logged that day.</p>';
+  }
+  return html + '<div class="tr-day"><p class="tr-detail" style="margin:10px 0 6px">' + head + '</p>' + body + '</div>';
+}
+async function loadDayDetail(k) {
+  if (TR.days[k] && !TR.days[k].error) return;
+  delete TR.days[k];
+  try {
+    const res = await api({ action: 'day', key: k });
+    TR.days[k] = res && res.success ? res : { error: (res && res.error) === 'Unknown action.' ? 'Needs the HealthLog v7 update on the receiver.' : 'Couldn’t load that day.' };
+  } catch (e) { TR.days[k] = { error: 'Couldn’t load that day (offline?).' }; }
+  if (view === 'trends') trendsRender();
+}
+
+/* ---------- Sleep: quality from wake check-ins, and how days compare after better or worse nights ---------- */
+function sleepView(T2) {
+  const nights = T2.list.filter((x) => typeof x.d.q === 'number');
+  const W = 360, H = 70, L = 4, R = 4, n = T2.list.length, bw = (W - L - R) / n;
+  let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Sleep quality per night, last six weeks">' +
+    '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + (H - 12) + '" y2="' + (H - 12) + '" class="tr-grid"/>';
+  T2.list.forEach((x, i) => {
+    if (typeof x.d.q !== 'number') return;
+    const h = Math.max(2, (x.d.q / 10) * (H - 16));
+    svg += '<rect x="' + (L + i * bw + 1).toFixed(1) + '" y="' + (H - 12 - h).toFixed(1) + '" width="' + Math.max(2, bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.5" class="tr-sleepbar' + (x.d.q <= 5 ? ' poor' : '') + '"><title>' + esc(longDate(x.key)) + ': ' + x.d.q + '/10</title></rect>';
+  });
+  svg += '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(T2.list[0].key)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(T2.list[n - 1].key)) + '</text></svg>';
+  let text;
+  if (nights.length < 6) {
+    text = 'Only ' + nights.length + ' night' + (nights.length === 1 ? '' : 's') + ' with a sleep-quality score so far. Rate sleep in the Wake check-in and this will start to show how your nights and days line up.';
+  } else {
+    const good = nights.filter((x) => x.d.q >= 7 && x.load !== null), poor = nights.filter((x) => x.d.q <= 5 && x.load !== null);
+    const qAvg = nights.reduce((a, x) => a + x.d.q, 0) / nights.length;
+    text = 'Average sleep quality ' + qAvg.toFixed(1) + '/10 over ' + nights.length + ' nights. ';
+    if (good.length >= 3 && poor.length >= 3) {
+      const g = avgLoad(good), p = avgLoad(poor);
+      const diff = p - g;
+      text += 'Days after nights you rated 7+ averaged ' + g.toFixed(1) + '; after 5 or under, ' + p.toFixed(1) + ' (' + good.length + ' vs ' + poor.length + ' nights). ' +
+        (Math.abs(diff) < 0.4 ? 'So far that’s no clear difference.' : diff > 0 ? 'Poorer nights have tended to come before heavier days.' : 'Poorer nights haven’t been followed by heavier days so far.');
+    } else text += 'Not enough good and poor nights yet to compare them with how the next day went.';
+    const dist = nights.filter((x) => typeof x.d.z === 'number');
+    if (dist.length >= 4) text += ' Disturbed sleep averages ' + (dist.reduce((a, x) => a + x.d.z, 0) / dist.length).toFixed(1) + '/5.';
+    text += ' This is a pattern in your own logs, not proof of cause.';
+  }
+  return '<h2 class="tr-h">Sleep</h2>' + svg + '<p class="tr-detail">' + esc(text) + '</p>';
+}
+
 function trendsClick(ev) {
   const el = ev.target.closest('[data-tr]');
   if (!el) return;
@@ -1624,6 +1718,12 @@ function trendsClick(ev) {
     if (!TR.on.length) TR.on = ['load'];
     LS.set('trends.on', TR.on); trendsRender();
   }
+  else if (act === 'inc') {
+    TR.inc = TR.inc.includes(v) ? TR.inc.filter((x) => x !== v) : TR.inc.concat(v);
+    if (!TR.inc.length) TR.inc = [v];
+    LS.set('trends.inc', TR.inc); trendsRender();
+  }
+  else if (act === 'sday') { TR.ssel = TR.ssel === v ? null : v; trendsRender(); if (TR.ssel) loadDayDetail(TR.ssel); }
   else if (act === 'pair') openSettings('pair');
 }
 
