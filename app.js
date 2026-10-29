@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v24 · 29 Oct';
+const APP_VERSION = 'v25 · 29 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -558,7 +558,8 @@ function checkinView() {
     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button></div>';
   if (S.open) {
     const stage = S.stage || guessStage();
-    const list = (period === 'Wake' && stage === 'bed' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]));
+    const list = (period === 'Wake' && stage === 'bed' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]))
+      .concat(period === 'Bed' ? [['stress', 'Stress today (0–5)', 5]] : []);  // whole-day stress, Stress column (HealthLog v14)
     html += '<div id="check-body" style="display:flex;flex-direction:column;gap:14px">' +
       '<div class="grid3" role="group" aria-label="When">' + ['Wake', 'Day', 'Bed'].map((p) =>
         '<button type="button" class="seg" data-act="period" data-v="' + p + '" aria-pressed="' + (period === p) + '">' + p + '</button>').join('') + '</div>' +
@@ -1057,7 +1058,7 @@ function logAct(el) {
     // Bring the check-in to the top of the screen so the sliders are in view.
     if (S.open) requestAnimationFrame(() => { const c = document.querySelector('#log-main section[aria-label="Check-in"]'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   }
-  else if (act === 'period') { S.period = v; if (v !== 'Wake' || (S.stage || guessStage()) === 'up') { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
+  else if (act === 'period') { S.period = v; if (v !== 'Bed') delete S.scores.stress; if (v !== 'Wake' || (S.stage || guessStage()) === 'up') { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
   else if (act === 'stage') { S.stage = v; if (v === 'up') { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
   else if (act === 'bristol') { S.bristol = S.bristol === Number(v) ? null : Number(v); logRender(); }
   else if (act === 'size') { S.size = S.size === v ? null : v; logRender(); }
