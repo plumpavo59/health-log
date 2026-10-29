@@ -1,4 +1,4 @@
-# Generates index.html (Health log icon) and today/index.html (Today icon). Run after editing.
+# Generates index.html (Life HQ, opens on Today) and today/index.html (older Today icon). Run after editing.
 THEME = """<script>(function(){var t='auto';try{t=JSON.parse(localStorage.getItem('hq.theme')||'"auto"')}catch(e){}var d=t==='dark'||(t==='auto'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=d?'dark':'light';var m=document.querySelector('meta[name=theme-color]');if(m)m.content=d?'#000000':'#ffffff'})()</script>"""
 ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
 TABS = f"""<nav id="tabbar" aria-label="Sections">
@@ -41,5 +41,5 @@ def shell(start, base, title):
 </body>
 </html>
 """
-open('index.html', 'w').write(shell('log', './', 'Health log'))
-open('today/index.html', 'w').write(shell('today', '../', 'Today'))
+open('index.html', 'w').write(shell('today', './', 'Life HQ'))
+open('today/index.html', 'w').write(shell('today', '../', 'Life HQ'))

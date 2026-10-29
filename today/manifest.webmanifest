@@ -1,6 +1,6 @@
 {
-  "name": "Today",
-  "short_name": "Today",
+  "name": "Life HQ",
+  "short_name": "Life HQ",
   "start_url": "./",
   "scope": "../",
   "display": "standalone",
