@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v18 · 28 Oct';
+const APP_VERSION = 'v19 · 29 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -281,8 +281,8 @@ const pending = {};
 let sending = false;
 
 function guessPeriod() {
-  const h = new Date().getHours();
-  if (h >= 22 || h < 4) return 'Bed';
+  const now = new Date(), h = now.getHours(), mins = h * 60 + now.getMinutes();
+  if (mins >= 23 * 60 + 30 || h < 4) return 'Bed';
   if (h < 14 && !cfg.today.wakeAt && !recent.some((r) => r.day === dayKey(new Date()) && r.wake)) return 'Wake';
   return 'Day';
 }
@@ -291,7 +291,8 @@ const S = {
   open: false, period: null, scores: {}, checkNote: '', calMed: null,
   bristol: null, size: null, urgent: false, bowelNote: '',
   meds: [], doses: {}, food: '', time: null, timeOpen: false,
-  sheet: null, sheetFresh: false, refreshing: false, inboxText: '', inboxStatus: '',
+  sheet: null, sheetFresh: false, refreshing: false, inboxText: '', inboxStatus: '', dirty: false,
+  sleepT: { bed: '', wake: '', up: '' },
   actText: '', actType: null, actMin: null, actEffort: null
 };
 const ACT_TYPES = ['Walk', 'Dance', 'Aerial', 'Cycle', 'Carrying/lifting', 'Other'];
@@ -412,12 +413,10 @@ function calendarView(name, d, today, cls) {
 function checkinView() {
   const period = S.period || guessPeriod();
   const last = cfg.today.lastCheckin ? 'Last: ' + cfg.today.lastCheckin.toLowerCase() : 'None yet today';
-  const flared = flareToday();
   let html = '<section class="card" aria-label="Check-in"><div class="check-row">' +
     '<button type="button" class="check-toggle" data-act="toggle" aria-expanded="' + S.open + '" aria-controls="check-body">' +
-    '<span aria-hidden="true"></span><span><h2>Check-in</h2><span class="sub">' + (S.open ? 'Leave anything blank you didn’t notice' : esc(last) + ' · tap to open') + '</span></span>' +
-    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>' +
-    '<button type="button" class="flare-btn" data-act="flare" aria-pressed="' + !!flared + '" aria-label="' + (flared ? 'Flare marked today at ' + esc(flared) : 'Mark today as a flare') + '">' + (flared ? 'Flare ✓' : 'Flare') + '</button></div>';
+    '<span aria-hidden="true"></span><span><h2>Check-in</h2><span class="sub">' + (S.open ? 'Leave anything blank you didn’t notice' : esc(last)) + '</span></span>' +
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button></div>';
   if (S.open) {
     const list = (period === 'Wake' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]));
     html += '<div id="check-body" style="display:flex;flex-direction:column;gap:14px">' +
@@ -430,14 +429,31 @@ function checkinView() {
           '<input id="r-' + k + '" type="range" min="0" max="' + max + '" step="0.5" value="' + (set ? v : max / 2) + '" data-score="' + k + '"' + (set ? '' : ' class="unset"') + '>' +
           '<output id="o-' + k + '" for="r-' + k + '"' + (set ? '' : ' class="unset"') + '>' + (set ? v : '–') + '</output></div>';
       }).join('') + '</div>' +
+      (period === 'Wake' ? '<div class="sleep-times" role="group" aria-label="Sleep times">' + [['bed', 'Went to sleep'], ['wake', 'Woke'], ['up', 'Got up']].map(([k, l]) =>
+        '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') + '</div>' : '') +
       '<input type="text" data-field="checkNote" value="' + esc(S.checkNote) + '" placeholder="Note (optional)" aria-label="Check-in note" autocomplete="off">' +
       '<button type="button" class="log wide" id="check-save" data-act="checkin"></button></div>';
   }
   return html + '</section>';
 }
 
+/* Typing guard: background refreshes (saving, config, the 60 s tick) wait until you leave the text box,
+   so the box doesn't lose focus mid-word. Taps you make still re-render straight away, keeping your place. */
+function typingInLog() {
+  const a = document.activeElement;
+  return !!(a && a.closest && a.closest('#log-view') && /^(INPUT|TEXTAREA)$/.test(a.tagName) && !/^(range|checkbox|radio)$/.test(a.type) && a.id !== 'focus-proxy');
+}
+function logRenderSoft() { if (typingInLog()) { S.dirty = true; return; } logRender(); }
+document.addEventListener('focusout', (e) => {
+  if (!S.dirty || !(e.target.closest && e.target.closest('#log-view'))) return;
+  setTimeout(() => { if (S.dirty && !typingInLog()) logRender(); }, 60);
+});
 function logRender() {
   if (view !== 'log') return;
+  S.dirty = false;
+  const ae = document.activeElement;
+  const keep = ae && ae.closest && ae.closest('#log-main') && /^(INPUT|TEXTAREA)$/.test(ae.tagName)
+    ? { sel: ae.id ? '#' + ae.id : ae.dataset.field ? '[data-field="' + ae.dataset.field + '"]' : ae.dataset.sleep ? '[data-sleep="' + ae.dataset.sleep + '"]' : '', a: ae.selectionStart, b: ae.selectionEnd } : null;
   if (!$('log-main')) { $('log-view').innerHTML = '<input id="focus-proxy" class="focus-proxy" type="text" aria-hidden="true" tabindex="-1"><div id="log-main"></div><div id="log-more" class="log-more"></div>'; }
   const app = $('log-main');
   const head = (actions) => '<div class="top"><span class="eyebrow">LIFE HQ</span><div class="top-actions">' + actions +
@@ -451,25 +467,48 @@ function logRender() {
   const now = new Date();
   const today = dayKey(now);
   const timeLabel = S.time ? (dayKey(S.time) === today ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time) : 'Now · ' + hm(now);
-  const medsChosen = S.meds.length;
-  const rows = recent.filter((r) => r.day === today).slice(0, 5);
+  const rows = todayEntries().slice().reverse();
+  const failed = recent.filter((r) => r.day === today && r.status === 'failed');
   const waiting = queue.length;
   app.innerHTML =
-    head('<button type="button" class="pill' + (S.time ? ' set' : '') + '" data-act="time" aria-expanded="' + S.timeOpen + '" aria-label="Time for the next entry: ' + esc(timeLabel) + '">' +
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>' + esc(timeLabel) + '</button>') +
-    (S.timeOpen ? '<div class="time-panel"><label for="time-input" class="small">Time for the next entry</label>' +
-      '<input id="time-input" type="datetime-local" value="' + localInputValue(S.time || now) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '">' +
-      '<div class="btns"><button type="button" class="log" data-act="time-set">Use this time</button><button type="button" class="seg" data-act="time-now">Now</button></div></div>' : '') +
+    head('') +
+    // The time pill floats at the top while you scroll; the panel opens here, or inside a sheet when one is open.
+    '<div class="time-bar">' + timePill(timeLabel) + '</div>' + (S.timeOpen && !S.sheet ? timePanel(now) : '') +
     trialView() + logInboxView() + checkinView() + quickView() +
     (waiting ? '<div class="queue-note"><span>' + waiting + ' waiting to send</span><button type="button" class="link-btn" data-act="flush">Send now</button></div>' : '') +
-    (rows.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + rows.map((r) =>
-      '<div class="lrow"><span class="t">' + esc(r.hm) + '</span><span>' + esc(r.text) + '</span>' +
+    (rows.length || failed.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + rows.map((r) =>
+      '<div class="lrow"><span class="t">' + esc(r.hm || '–') + '</span><span>' + esc(r.text) + '</span>' +
       (r.status === 'pending' ? '<button type="button" class="link-btn" data-act="undo" data-v="' + esc(r.id) + '">Undo</button>' :
-        '<span class="st' + (r.status === 'failed' ? ' bad' : '') + '">' + (r.status === 'saved' ? 'Saved' : r.status === 'failed' ? 'Not saved' : 'Waiting') + '</span>') + '</div>').join('') + '</section>' : '') +
+        r.local && r.status !== 'saved' ? '<span class="st">Waiting</span>' : '<span class="st">' + esc(r.src || '') + '</span>') + '</div>').join('') +
+      failed.map((r) => '<div class="lrow"><span class="t">' + esc(r.hm) + '</span><span>' + esc(r.text) + '</span><span class="st bad">Not saved</span></div>').join('') + '</section>' : '') +
     sheetView();
   S.sheetFresh = false;
   document.body.classList.toggle('sheet-open', !!S.sheet || !!TR.pop);
   updateCheckButton();
+  if (keep && keep.sel) {
+    const el = app.querySelector(keep.sel);
+    if (el) { el.focus({ preventScroll: true }); try { if (keep.a !== null && keep.a !== undefined) el.setSelectionRange(keep.a, keep.b); } catch (e) {} }
+  }
+}
+const CLOCK_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+function timePill(label) {
+  return '<button type="button" class="pill' + (S.time ? ' set' : '') + '" data-act="time" aria-expanded="' + S.timeOpen + '" aria-label="Time for the next entry: ' + esc(label) + '">' + CLOCK_SVG + esc(label) + '</button>';
+}
+function timePanel(now) {
+  return '<div class="time-panel"><label for="time-input" class="small">Time for the next entry</label>' +
+    '<input id="time-input" type="datetime-local" value="' + localInputValue(S.time || now) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '">' +
+    '<div class="btns"><button type="button" class="log" data-act="time-set">Use this time</button><button type="button" class="seg" data-act="time-now">Now</button></div></div>';
+}
+/* Today's entries (this health day, 4am cut-off) from every source: the receiver's list (HealthLog v12),
+   plus anything on this phone that hasn't reached it yet. Oldest first. */
+function todayEntries() {
+  const hk = healthKey(new Date());
+  const server = Array.isArray(cfg.todayLog) && cfg.todayHday === hk ? cfg.todayLog : [];
+  const ids = new Set(server.map((x) => x.id).filter(Boolean));
+  const local = recent.filter((r) => (r.hday || r.day) === hk && r.status !== 'failed' && !ids.has(r.id))
+    .map((r) => ({ hm: r.hm, kind: r.kind, text: r.text, min: r.minutes || 0, id: r.id, status: r.status, local: true }));
+  const order = (t) => (!t ? '9' : t < '04:00' ? '2' + t : '1' + t);
+  return server.map((x) => Object.assign({ src: x.via && x.via !== 'App' ? x.via : '' }, x)).concat(local).sort((a, b) => order(a.hm).localeCompare(order(b.hm)));
 }
 
 /* ---------- Log page: one-line inbox (same queue and sender as Today's inbox) ---------- */
@@ -503,15 +542,23 @@ const QUICK = [
   ['activity', 'Activity', QI('<circle cx="13.5" cy="4.5" r="1.8"/><path d="m8 21 3-6 3 2.5V21M11 15l1.2-5.5L16 12l3-1M12.2 9.5 8.5 10.5 7 13.5"/>')]
 ];
 const X_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
-function quickCount(kind) {
+/* Doses logged today per medicine (server count + this phone's not-yet-sent ones). */
+function medTakenToday(m) {
   const hk = healthKey(new Date());
+  return (((cfg.today || {}).meds || {})[m.name] || 0) +
+    recent.filter((r) => r.kind === 'meds' && r.hday === hk && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)).length;
+}
+function quickCount(kind) {
   if (kind === 'meds') {
-    const n = (cfg.meds || []).filter((m) => takenMark(m)).length;
-    return n ? n + ' today' : '';
+    // Routine medicines ("Per day" above 0 in Log settings): how many of today's doses are logged, and how many are left.
+    const routine = (cfg.meds || []).filter((m) => Number(m.perDay) > 0 && !maxTabs(m));
+    const total = routine.reduce((t, m) => t + Number(m.perDay), 0);
+    if (!total) return '';
+    const done = routine.reduce((t, m) => t + Math.min(medTakenToday(m), Number(m.perDay)), 0);
+    return done >= total ? 'All ' + total + ' ✓' : done + '/' + total + ' · ' + (total - done) + ' left';
   }
-  const k = kind === 'food' ? 'food' : kind;
-  const rows = recent.filter((r) => r.kind === k && r.hday === hk && r.status !== 'failed');
-  if (kind === 'activity') { const mins = rows.reduce((t, r) => t + (r.minutes || 0), 0); return mins ? mins + ' min' : rows.length ? rows.length + ' today' : ''; }
+  const rows = todayEntries().filter((r) => r.kind === kind);
+  if (kind === 'activity') { const mins = rows.reduce((t, r) => t + (r.min || 0), 0); return mins ? mins + ' min' : rows.length ? rows.length + ' today' : ''; }
   return rows.length ? rows.length + ' today' : '';
 }
 function quickView() {
@@ -529,7 +576,7 @@ function sheetView() {
     const n = S.meds.length;
     btn = '<button type="button" class="log" data-act="meds"' + (n ? '' : ' disabled') + '>' + (n ? 'Log ' + n : 'Log') + '</button>';
     body = '<div class="chips">' + (cfg.meds || []).map((m) =>
-      '<button type="button" class="chip" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><b>' + esc(m.name) + '</b>' + chipDose(m) + takenMark(m) + '</button>').join('') +
+      '<button type="button" class="chip med" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><small class="dose-top">' + esc(chipDoseTop(m)) + '</small><span class="med-name"><b>' + esc(m.name) + '</b>' + takenMark(m) + '</span></button>').join('') +
       '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' + doseRows() + historyView();
   } else if (S.sheet === 'bowel') {
     btn = '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button>';
@@ -547,7 +594,9 @@ function sheetView() {
       '<div class="opt-h">Effort</div><div class="grid3" role="group" aria-label="Effort">' + ACT_EFFORT.map((e) => '<button type="button" class="seg" data-act="act-effort" data-v="' + e + '" aria-pressed="' + (S.actEffort === e) + '">' + e + '</button>').join('') + '</div>' +
       '<p class="small" id="act-hint">' + actHint() + '</p>';
   }
-  const when = S.time ? '<p class="small sheet-when">Will log at ' + esc((dayKey(S.time) === dayKey(new Date()) ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time)) + ' (time set at the top)</p>' : '';
+  const now = new Date();
+  const label = S.time ? (dayKey(S.time) === dayKey(now) ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time) : 'Now · ' + hm(now);
+  const when = '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
   return '<div class="sheet-backdrop' + (S.sheetFresh ? ' fresh' : '') + '" data-act="sheet-close"></div>' +
     '<div class="sheet' + (S.sheetFresh ? ' fresh' : '') + '" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">' +
     '<div class="sheet-grab" aria-hidden="true"></div><div class="sheet-head"><h2 id="sheet-title">' + title + '</h2>' + btn +
@@ -624,12 +673,8 @@ function takenMark(m) {
   return '<span class="taken" aria-label="' + (n < per && !asNeeded ? n + ' of ' + per + ' logged today' : 'logged today' + (n > 1 ? ', ' + n + ' times' : '')) + '">' + text + '</span>';
 }
 
-/* Compact chips: the strength only appears once a medicine is selected. */
-function chipDose(m) {
-  if (!S.meds.includes(m.name)) return '';
-  const text = isDosed(m) ? doseText(m) : m.strength;
-  return text ? '<small>' + esc(text) + '</small>' : '';
-}
+/* The strength sits above the name and never changes on selection, so the chips don't shift around. */
+function chipDoseTop(m) { return isDosed(m) ? doseShort(medOptions(m)) + (maxTabs(m) ? ' · 1–' + maxTabs(m) : '') : (m.strength || ''); }
 
 function doseRows() {
   const rows = (cfg.meds || []).filter((m) => S.meds.includes(m.name) && isDosed(m));
@@ -660,8 +705,15 @@ function logMoreRender() {
   if (!more) return;
   if (!more.dataset.built) {
     more.dataset.built = '1';
-    more.innerHTML = '<div class="tv"><div class="recent-buttons"><button id="toggle-medication" type="button" aria-expanded="false" aria-controls="medications">Recent meds</button></div>' +
-      '<div id="medications" aria-live="polite" hidden></div></div>' + fileLinks([['Health sheet', LINKS.healthSheet], ['Health GPT', LINKS.healthGpt]]);
+    more.innerHTML = '<div class="tv"><div class="recent-buttons"><button id="toggle-medication" type="button" aria-expanded="false" aria-controls="medications">Recent meds</button>' +
+      '<button id="toggle-log-inbox" type="button" aria-expanded="false" aria-controls="log-recent-logs">Recent inbox entries</button></div>' +
+      '<div id="medications" aria-live="polite" hidden></div><div id="log-recent-logs" aria-live="polite" hidden></div></div>' + fileLinks([['Health sheet', LINKS.healthSheet], ['Health GPT', LINKS.healthGpt]]);
+    $('toggle-log-inbox').onclick = () => {
+      const open = $('log-recent-logs').hidden;
+      $('log-recent-logs').hidden = !open;
+      $('toggle-log-inbox').setAttribute('aria-expanded', String(open));
+      if (open) loadRecentLogs('log-recent-logs');
+    };
     $('toggle-medication').onclick = () => {
       const open = $('medications').hidden;
       $('medications').hidden = !open;
@@ -678,9 +730,9 @@ function localInputValue(d) { return dayKey(d) + 'T' + hm(d); }
 function updateCheckButton() {
   const b = $('check-save');
   if (!b) return;
-  const n = Object.keys(S.scores).length;
+  const n = Object.keys(S.scores).length + ((S.period || guessPeriod()) === 'Wake' ? Object.values(S.sleepT).filter(Boolean).length : 0);
   b.disabled = !n;
-  b.textContent = n ? 'Save check-in · ' + n + (n === 1 ? ' rating' : ' ratings') : 'Save check-in';
+  b.textContent = n ? 'Save check-in · ' + n + (n === 1 ? ' entry' : ' entries') : 'Save check-in';
 }
 
 function saveLocal() { LS.set('recent', recent.slice(0, 40)); LS.set('queue', queue); }
@@ -724,11 +776,11 @@ function setStatus(id, status, error) {
   const r = recent.find((x) => x.id === id);
   if (r) { r.status = status; if (error) r.error = error; }
   saveLocal();
-  logRender();
+  logRenderSoft();
 }
 
 async function logFlush() {
-  if (sending || !queue.length || !navigator.onLine || !Conn.canLog()) { logRender(); return; }
+  if (sending || !queue.length || !navigator.onLine || !Conn.canLog()) { logRenderSoft(); return; }
   sending = true;
   let saved = 0, failedMsg = '';
   try {
@@ -747,7 +799,7 @@ async function logFlush() {
   else if (saved && $('toast').hidden) toast('Saved ✓');
   else if (queue.length && !navigator.onLine) toast('Saved on phone · will send when online');
   if (saved) logRefreshConfig();
-  logRender();
+  logRenderSoft();
 }
 
 async function logRefreshConfig() {
@@ -755,7 +807,8 @@ async function logRefreshConfig() {
   try {
     const res = await api({ action: 'config' });
     if (res && res.success) {
-      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds, today: res.today || FALLBACK.today };
+      cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds,
+        todayLog: res.todayLog, todayHday: healthKey(new Date()), today: res.today || FALLBACK.today };
       if ($('medications') && !$('medications').hidden) renderRecentMeds();
       if (S.sheet && document.activeElement && /INPUT/.test(document.activeElement.tagName) && document.activeElement.closest('#sheet')) {
         LS.set('config', { data: cfg, day: dayKey(new Date()) });   // don't rebuild a sheet while typing in it
@@ -763,7 +816,7 @@ async function logRefreshConfig() {
         return true;
       }
       LS.set('config', { data: cfg, day: dayKey(new Date()) });
-      logRender();
+      logRenderSoft();
       if (view === 'trends') trendsRender();
       return true;
     }
@@ -863,12 +916,14 @@ function logAct(el) {
     S.food = ''; closeSheet();
   }
   else if (act === 'checkin') {
-    const n = Object.keys(S.scores).length;
-    if (!n) return;
     const period = S.period || guessPeriod();
-    commit('checkin', { period, scores: Object.assign({}, S.scores), note: S.checkNote.trim() },
-      'Check-in (' + period.toLowerCase() + ') · ' + n + (n === 1 ? ' rating' : ' ratings'), { wake: period === 'Wake' });
-    S.scores = {}; S.checkNote = ''; S.open = false; S.period = null; logRender();
+    const times = period === 'Wake' ? Object.fromEntries(Object.entries(S.sleepT).filter(([, v]) => /^\d{2}:\d{2}$/.test(v))) : {};
+    const n = Object.keys(S.scores).length, t = Object.keys(times).length;
+    if (!n && !t) return;
+    const tl = [times.bed ? 'slept ' + times.bed : '', times.wake ? 'woke ' + times.wake : '', times.up ? 'up ' + times.up : ''].filter(Boolean).join(', ');
+    commit('checkin', { period, scores: Object.assign({}, S.scores), note: S.checkNote.trim(), sleep: times },
+      'Check-in (' + period.toLowerCase() + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : ''), { wake: period === 'Wake' });
+    S.scores = {}; S.checkNote = ''; S.open = false; S.period = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
   }
   else if (act === 'trial') {
     const t = cfg.trial;
@@ -892,6 +947,9 @@ document.addEventListener('input', (ev) => {
     S.scores[k] = Number(el.value);
     el.classList.remove('unset');
     const o = $('o-' + k); o.textContent = el.value; o.classList.remove('unset');
+    updateCheckButton();
+  } else if (el.dataset.sleep) {
+    S.sleepT[el.dataset.sleep] = el.value;
     updateCheckButton();
   } else if (el.dataset.field) {
     S[el.dataset.field] = el.value;
@@ -1547,9 +1605,11 @@ function loadMoney() {
 
 const minuteTime = (value) => String(value || '').replace(/(\d{1,2}:\d{2}):\d{2}(?:\.\d+)?/g, '$1');
 
-function loadRecentLogs() {
-  const list = $('recent-logs');
-  return panelLoad('getRecentInboxLogs', 'recent-logs', (rows) => {
+function loadRecentLogs(panelId) {
+  const id = panelId || 'recent-logs';
+  const list = $(id);
+  if (!list) return;
+  return panelLoad('getRecentInboxLogs', id, (rows) => {
     list.replaceChildren();
     if (!rows || !rows.length) { list.textContent = 'No inbox entries yet.'; return; }
     const hasRoutes = rows.every((entry) => entry.destinations);
@@ -1730,7 +1790,7 @@ const TREND_SYMS = [
    own usual, or the average is. Roughly 1 day in 5 comes out worse with these numbers. */
 const USUAL_DAYS = 28, USUAL_MIN = 5, MIN_READINGS = 2;
 const SYM_WORSE = 1.0, SYM_MUCH = 2.0, AVG_WORSE = 0.5, AVG_MUCH = 1.25, AVG_BETTER = -0.75;
-const TR = { at: 0, loading: false, sel: null, ssel: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f']), days: {} };
+const TR = { at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f']), days: {} };
 // Brain fog and headache are off by default now; move anyone still on the old default.
 if (TR.inc.length === 5 && ['p', 's', 'f', 'g', 'h'].every((k) => TR.inc.includes(k))) { TR.inc = ['p', 's', 'f']; LS.set('trends.inc', TR.inc); }
 const incSyms = () => TREND_SYMS.filter((x) => TR.inc.includes(x.k));
@@ -1747,6 +1807,8 @@ function trendsEnter() {
     $('trends-refresh').onclick = () => spin($('trends-refresh'), trendsLoad);
     $('trends-settings').onclick = () => openSettings();
     el.addEventListener('click', trendsClick);
+    el.addEventListener('mouseover', (e) => { const t = e.target.closest && e.target.closest('[data-tip]'); if (t && t !== TR.tipEl) showTip(t); });
+    el.addEventListener('mouseout', (e) => { const t = e.target.closest && e.target.closest('[data-tip]'); if (t && !(e.relatedTarget && t.contains(e.relatedTarget))) hideTip(); });
   }
   trendsRender();
   if (Conn.canLog() && (!TR.at || Date.now() - TR.at > 120000)) trendsLoad();
@@ -1823,6 +1885,49 @@ const shortDate = (k) => keyToDate(k).toLocaleDateString('en-GB', { day: 'numeri
 const longDate = (k) => keyToDate(k).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 const avgLoad = (xs) => { const v = xs.filter((x) => x.load !== null); return v.length ? v.reduce((a, x) => a + x.load, 0) / v.length : null; };
 
+/* Scrollable calendar: every Monday-start week from the first day with data to this week. About six weeks
+   show at a time; it opens on the latest week and remembers where you scrolled. cell(k) returns one day's HTML. */
+function calGrid(key, label, firstKey, today, cell) {
+  const end = addDays(today, 6 - ((keyToDate(today).getDay() + 6) % 7));
+  let start = firstKey ? addDays(firstKey, -((keyToDate(firstKey).getDay() + 6) % 7)) : end;
+  if (start > addDays(end, -41)) start = addDays(end, -41);
+  const weeks = Math.round((keyToDate(end) - keyToDate(start)) / 86400000 + 1) / 7;
+  let html = '<div class="tr-cal tr-cal-head" aria-hidden="true">' + ['', 'M', 'T', 'W', 'T', 'F', 'S', 'S'].map((t) => '<span class="tr-dh">' + t + '</span>').join('') + '</div>' +
+    '<div class="tr-cal-scroll" data-cal="' + key + '" role="grid" aria-label="' + esc(label) + '"><div class="tr-cal">';
+  for (let w = 0; w < Math.round(weeks); w++) {
+    const ws = addDays(start, w * 7);
+    html += '<span class="tr-wk">' + esc(shortDate(ws)) + '</span>';
+    for (let i = 0; i < 7; i++) {
+      const k = addDays(ws, i);
+      html += k > today ? '<span class="tr-cell future"></span>' : cell(k);
+    }
+  }
+  return html + '</div></div>';
+}
+function restoreCalScroll(root) {
+  TR.calScroll = TR.calScroll || {};
+  root.querySelectorAll('.tr-cal-scroll').forEach((el) => {
+    const k = el.dataset.cal;
+    el.scrollTop = TR.calScroll[k] !== undefined ? TR.calScroll[k] : el.scrollHeight;
+    el.addEventListener('scroll', () => { TR.calScroll[k] = el.scrollTop; hideTip(); }, { passive: true });
+  });
+}
+/* Info box for chart readings: hover on a computer, tap on the phone. Elements carry data-tip. */
+function showTip(el) {
+  let t = $('tr-tip');
+  if (!t) { t = document.createElement('div'); t.id = 'tr-tip'; t.className = 'tr-tip'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+  t.textContent = el.getAttribute('data-tip');
+  t.hidden = false;
+  const r = el.getBoundingClientRect(), tw = t.offsetWidth, th = t.offsetHeight;
+  const left = Math.min(Math.max(8, r.left + r.width / 2 - tw / 2), window.innerWidth - tw - 8);
+  const top = r.top - th - 8 < 8 ? r.bottom + 8 : r.top - th - 8;
+  t.style.left = left + 'px'; t.style.top = top + 'px';
+  TR.tipEl = el;
+}
+function hideTip() { const t = $('tr-tip'); if (t) t.hidden = true; TR.tipEl = null; }
+window.addEventListener('scroll', hideTip, { passive: true });
+document.addEventListener('click', (e) => { if (TR.tipEl && !(e.target.closest && e.target.closest('[data-tip]'))) hideTip(); });
+
 function trendsRender() {
   const body = $('trends-body');
   if (!body) return;
@@ -1838,43 +1943,34 @@ function trendsRender() {
   const l28 = last(28, 0);
   const rough = l28.filter((x) => x.cls === 'worse' || x.cls === 'much').length;
   const eps = flareEpisodes(list).filter((e) => e.to > addDays(today, -28));
-  const marked = eps.filter((e) => e.marked), possible = eps.filter((e) => !e.marked);
+  const possible = eps.filter((e) => !e.marked);
   const wkDiff = (() => { const v = last(7, 0).filter((x) => x.enough && x.usual !== null); return v.length ? v.reduce((t, x) => t + x.load - x.usual, 0) / v.length : null; })();
   let html = '<div class="tr-stats">' +
     '<div class="tr-stat"><span>Rough days</span><b>' + rough + '</b><small>last 4 weeks</small></div>' +
-    '<div class="tr-stat"><span>Flares</span><b>' + marked.length + '</b><small>' + (possible.length ? '+' + possible.length + ' possible' : 'last 4 weeks') + '</small></div>' +
+    '<div class="tr-stat"><span>Flares</span><b>' + eps.length + '</b><small>' + (possible.length ? 'from your scores' : 'last 4 weeks') + '</small></div>' +
     '<div class="tr-stat"><span>This week</span><b>' + (wkDiff === null ? '–' : Math.abs(wkDiff) < 0.25 ? 'Usual' : (wkDiff > 0 ? '+' : '−') + Math.abs(wkDiff).toFixed(1)) + '</b><small>' + (wkDiff !== null && Math.abs(wkDiff) < 0.25 ? 'about your usual' : 'vs your usual') + '</small></div></div>';
-  if (eps.length) html += '<div class="tr-eps">' + eps.slice(-3).reverse().map((e) => '<div class="tr-ep' + (e.marked ? '' : ' possible') + '"><i></i>' + esc(rangeText(e)) + ' · ' + e.days + (e.days === 1 ? ' day' : ' days') + (e.marked ? '' : ' · possible flare') + '</div>').join('') + '</div>';
+  if (eps.length) html += '<div class="tr-eps">' + eps.slice(-3).reverse().map((e) => '<div class="tr-ep' + (e.marked ? '' : ' possible') + '"><i></i>' + esc(rangeText(e)) + ' · ' + e.days + (e.days === 1 ? ' day' : ' days') + (e.marked ? '' : ' · from your scores') + '</div>').join('') + '</div>';
 
   html += '<div class="tr-inc"><span>Day score uses</span>' + TREND_SYMS.map((x) => '<button type="button" class="tr-chip" data-tr="inc" data-v="' + x.k + '" aria-pressed="' + TR.inc.includes(x.k) + '">' + esc(x.name) + '</button>').join('') + '</div>';
-  // Calendar: six Monday-start weeks ending with this week.
-  const end = addDays(today, 6 - ((keyToDate(today).getDay() + 6) % 7));
-  const start = addDays(end, -41);
+  // Calendar: scrollable, opens on the latest weeks.
   const CLS = { better: 'hb', usual: 'h1', worse: 'h3', much: 'h4', thin: 'thin' };
   const WORD = { better: 'better than usual', usual: 'about usual', worse: 'worse than usual', much: 'much worse than usual', thin: 'only one reading' };
-  html += '<div class="tr-cal" role="grid" aria-label="Symptom calendar, last six weeks">' +
-    ['', 'M', 'T', 'W', 'T', 'F', 'S', 'S'].map((t) => '<span class="tr-dh">' + t + '</span>').join('');
-  for (let w = 0; w < 6; w++) {
-    const ws = addDays(start, w * 7);
-    html += '<span class="tr-wk">' + esc(shortDate(ws)) + '</span>';
-    for (let i = 0; i < 7; i++) {
-      const k = addDays(ws, i), x = by[k], n = keyToDate(k).getDate();
-      const cls = ['tr-cell'];
-      if (k === today) cls.push('today');
-      if (k === TR.sel) cls.push('sel');
-      if (k > today) { html += '<span class="tr-cell future"></span>'; continue; }
-      const mark = x && x.flag ? '<i class="tr-flare"></i>' : x && x.cls === 'much' ? '<i class="tr-flare ring"></i>' : '';
-      if (x && x.cls !== 'none') {
-        cls.push(CLS[x.cls] || 'h1');
-        html += '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + ', ' + WORD[x.cls] + (x.flag ? ', flare marked' : '') + '">' + n + mark + '</button>';
-      } else {
-        cls.push('empty');
-        html += '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + (x && x.flag ? ', flare marked' : ', no check-in') + '">' + n + mark + '</button>';
-      }
+  const firstData = (list.find((x) => x.load !== null || x.flag) || {}).key;
+  html += calGrid('health', 'Symptom calendar', firstData, today, (k) => {
+    const x = by[k], n = keyToDate(k).getDate();
+    const cls = ['tr-cell'];
+    if (k === today) cls.push('today');
+    if (k === TR.sel) cls.push('sel');
+    const mark = x && x.flag ? '<i class="tr-flare"></i>' : x && x.cls === 'much' ? '<i class="tr-flare ring"></i>' : '';
+    if (x && x.cls !== 'none') {
+      cls.push(CLS[x.cls] || 'h1');
+      return '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + ', ' + WORD[x.cls] + (x.flag ? ', flare' : '') + '">' + n + mark + '</button>';
     }
-  }
-  html += '</div><div class="tr-key"><span class="tr-kc"><i class="hb"></i>Better</span><span class="tr-kc"><i class="h1"></i>Usual</span><span class="tr-kc"><i class="h3"></i>Worse</span><span class="tr-kc"><i class="h4"></i>Much worse</span>' +
-    '<span><i class="tr-flare inline"></i>Flare (you marked)</span><span><i class="tr-flare inline ring"></i>Possible flare</span></div>';
+    cls.push('empty');
+    return '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + (x && x.flag ? ', flare' : ', no check-in') + '">' + n + mark + '</button>';
+  });
+  html += '<div class="tr-key"><span class="tr-kc"><i class="hb"></i>Better</span><span class="tr-kc"><i class="h1"></i>Usual</span><span class="tr-kc"><i class="h3"></i>Worse</span><span class="tr-kc"><i class="h4"></i>Much worse</span>' +
+    '<span><i class="tr-flare inline ring"></i>Flare (from your scores)</span>' + (list.some((x) => x.flag) ? '<span><i class="tr-flare inline"></i>Flare (noted)</span>' : '') + '</div>';
 
   // Detail for the chosen day, with its 24-hour strip.
   const sel = TR.sel && TR.sel <= today ? TR.sel : null;
@@ -1882,10 +1978,10 @@ function trendsRender() {
     const x = by[sel];
     const vals = x ? TREND_SYMS.filter((sm) => typeof symVal(x.d, sm.k) === 'number').map((sm) => sm.name.toLowerCase() + ' ' + symVal(x.d, sm.k)) : [];
     html += '<p class="tr-detail"><b>' + esc(longDate(sel)) + '</b> · ' + (x && x.load !== null
-      ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') + (x.flag ? ' · flare marked' : '') + ' · ' + vals.join(', ') +
+      ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') + (x.flag ? ' · flare noted' : '') + ' · ' + vals.join(', ') +
         (Object.keys(x.dev || {}).filter((kk) => x.dev[kk] >= SYM_WORSE).length ? ' · above usual: ' + Object.keys(x.dev).filter((kk) => x.dev[kk] >= SYM_WORSE).map((kk) => TREND_SYMS.find((t) => t.k === kk).name.toLowerCase() + ' +' + x.dev[kk].toFixed(1)).join(', ') : '') +
         (x.readings ? ' · ' + x.readings + (x.readings === 1 ? ' reading' : ' readings') : '') + (T2.means ? '' : ' · daily highs')
-      : (x && x.flag ? 'flare marked · ' : '') + (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>' + dayStrip(sel);
+      : (x && x.flag ? 'flare noted · ' : '') + (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>' + dayStrip(sel);
   } else html += '<p class="tr-detail muted">Tap a day for its scores and a 24-hour view.</p>';
 
   // Chart chips + chart.
@@ -1893,8 +1989,8 @@ function trendsRender() {
   html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
   html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
-  html += stomachView(T2) + sleepView(T2);
-  html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. Flares are days you mark with the Flare button on the Log page; a ring marks a day much worse than usual. Days run 04:00 to 04:00.</p>' +
+  html += stomachView(T2) + medsView(today) + sleepView(T2);
+  html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. A ring marks a day much worse than usual; runs of those (with the worse days around them) show as flares. Days run 04:00 to 04:00.</p>' +
     fileLinks([['Health tracker', LINKS.healthSheet]]);
   if (TR.pop) {
     const G = giData();
@@ -1903,14 +1999,17 @@ function trendsRender() {
     TR.popFresh = false;
   }
   document.body.classList.toggle('sheet-open', !!TR.pop || !!S.sheet);
+  hideTip();
   body.innerHTML = html;
+  restoreCalScroll(body);
 }
 
 function trendsChart(T2) {
   const { marks } = T2;
   // Start the chart at the first logged day (at least the last 14 days) so empty weeks don't squash it.
-  const firstData = T2.list.findIndex((x) => x.load !== null);
-  const list = T2.list.slice(Math.max(0, Math.min(firstData < 0 ? 0 : firstData, T2.list.length - 14)));
+  const recent42 = T2.list.slice(-42);
+  const firstData = recent42.findIndex((x) => x.load !== null);
+  const list = recent42.slice(Math.max(0, Math.min(firstData < 0 ? 0 : firstData, recent42.length - 14)));
   const hasAct = list.some((x) => x.d.al);
   const BAND = hasAct ? 30 : 0;
   const W = 360, H = 190 + BAND, L = 22, R = 8, TOP = 16, B = 22 + BAND;
@@ -2094,8 +2193,19 @@ function dayPartsView(G, today) {
       else if (r === 0 && d[5] === 1) { cls = 'yes'; label = 'woke with stomach pain (no score)'; }
       else if (r === 0 && d[5] === 0) { cls = 's0'; label = 'no stomach pain on waking'; }
       if (!cls) continue;
-      svg += '<rect x="' + (L + i * bw + 0.5).toFixed(1) + '" y="' + (top + r * (rowH + gap)) + '" width="' + Math.max(1.5, bw - 1).toFixed(1) + '" height="' + rowH + '" rx="1.5" class="tr-part ' + cls + '"><title>' + esc(longDate(k)) + ': ' + label + '</title></rect>';
+      svg += '<rect x="' + (L + i * bw + 0.5).toFixed(1) + '" y="' + (top + r * (rowH + gap)) + '" width="' + Math.max(1.5, bw - 1).toFixed(1) + '" height="' + rowH + '" rx="1.5" class="tr-part ' + cls + '"/>';
     }
+  }
+  // Invisible columns on top: hover or tap shows that day's readings.
+  for (let i = 0; i < n; i++) {
+    const k = addDays(first, i), d = G.by[k];
+    if (!d) continue;
+    const bits = GI_PARTS.map((name, r) => (giNum(d[r + 1]) ? name.toLowerCase() + ' ' + d[r + 1] : '')).filter(Boolean);
+    if (!giNum(d[1]) && d[5] === 1) bits.unshift('woke with pain');
+    if (!giNum(d[1]) && d[5] === 0) bits.unshift('no pain on waking');
+    if (d[6] === 1) bits.push('probiotic');
+    if (!bits.length) continue;
+    svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (top + 4 * (rowH + gap)) + '" class="tr-hit" data-tip="' + esc(longDate(k) + ' · ' + bits.join(' · ')) + '"/>';
   }
   if (G.omeStart && G.omeStart > first && G.omeStart <= today) {
     const x = L + Math.round((keyToDate(G.omeStart) - keyToDate(first)) / 86400000) * bw;
@@ -2106,36 +2216,68 @@ function dayPartsView(G, today) {
     '<div class="tr-key"><span><i class="tr-omeline-key"></i>Omeprazole started</span><span><i class="tr-part-key yes"></i>Woke with pain, no score</span></div>' +
     patBtn('stomach', 'Stomach patterns');
 }
-/* Mornings before vs since the current omeprazole run (all 120 days the receiver sends). */
+/* Stomach patterns: mornings before vs since omeprazole, and probiotic (before vs since, and days taken vs not). */
+const PAINFUL_AT = 4;
 function stomachPatterns(G, today) {
-  const p = { title: 'Stomach patterns', comps: [], note: 'Morning = waking to about 1pm. A morning counts as painful at 2 or more, or when a note says you woke with stomach pain. Only logged mornings count.' };
-  if (!G.omeStart) { p.empty = 'Once omeprazole is logged, this compares mornings before and since.'; return p; }
-  const S = { b: { n: 0, pain: 0, sc: [], rest: [] }, a: { n: 0, pain: 0, sc: [], rest: [] } };
-  Object.keys(G.by).filter((k) => k <= today).forEach((k) => {
-    const d = G.by[k], s = S[k < G.omeStart ? 'b' : 'a'];
-    if (giNum(d[1]) || d[5] === 1 || d[5] === 0) { s.n++; if ((giNum(d[1]) && d[1] >= 2) || (!giNum(d[1]) && d[5] === 1)) s.pain++; }
-    if (giNum(d[1])) s.sc.push(d[1]);
-    const rest = [d[2], d[3], d[4]].filter(giNum);
-    if (rest.length) s.rest.push(mean1(rest));
-  });
-  if (S.b.n < 3 || S.a.n < 3) { p.empty = S.b.n < 3 ? 'Not enough mornings logged before omeprazole (started ' + shortDate(G.omeStart) + ') to compare yet.' : 'Omeprazole started ' + shortDate(G.omeStart) + '; a few more logged mornings and this will compare before and since.'; return p; }
-  const since = 'Since ' + shortDate(G.omeStart);
-  const pct = (s) => Math.round((100 * s.pain) / s.n);
-  const dp = pct(S.a) - pct(S.b);
-  p.comps.push({ title: 'Mornings with stomach pain', left: { label: 'Before omeprazole', value: S.b.pain + ' of ' + S.b.n, sub: pct(S.b) + '%' }, right: { label: since, value: S.a.pain + ' of ' + S.a.n, sub: pct(S.a) + '%' },
-    verdict: Math.abs(dp) < 10 ? 'About the same' : dp < 0 ? 'Fewer painful mornings since' : 'More painful mornings since', tone: Math.abs(dp) < 10 ? 'same' : dp < 0 ? 'better' : 'worse' });
-  const mb = mean1(S.b.sc), ma = mean1(S.a.sc);
-  if (mb !== null && ma !== null) {
-    const d = ma - mb;
-    p.comps.push({ title: 'Morning stomach pain, average', left: { label: 'Before', value: mb.toFixed(1) }, right: { label: since, value: ma.toFixed(1) },
-      verdict: Math.abs(d) < 0.5 ? 'About the same' : d < 0 ? 'Lower since' : 'Higher since', tone: Math.abs(d) < 0.5 ? 'same' : d < 0 ? 'better' : 'worse' });
+  const p = { title: 'Stomach patterns', comps: [], note: 'Morning = waking to about 1pm. A morning counts as painful at ' + PAINFUL_AT + ' or more, or when a note says you woke with stomach pain. Only logged mornings count.' };
+  const keys = Object.keys(G.by).filter((k) => k <= today).sort();
+  const tone = (d, small) => (Math.abs(d) < small ? 'same' : d < 0 ? 'better' : 'worse');
+  const avgComp = (title, a, b, aLabel, bLabel) => {
+    const ma = mean1(a), mb = mean1(b);
+    if (a.length < 3 || b.length < 3) return false;
+    const d = mb - ma;
+    p.comps.push({ title, left: { label: aLabel, value: ma.toFixed(1), sub: a.length + ' mornings' }, right: { label: bLabel, value: mb.toFixed(1), sub: b.length + ' mornings' },
+      verdict: Math.abs(d) < 0.5 ? 'About the same' : d < 0 ? 'Lower with it' : 'Higher with it', tone: tone(d, 0.5) });
+    return true;
+  };
+  if (G.omeStart) {
+    const S = { b: { n: 0, pain: 0, sc: [], rest: [] }, a: { n: 0, pain: 0, sc: [], rest: [] } };
+    keys.forEach((k) => {
+      const d = G.by[k], s = S[k < G.omeStart ? 'b' : 'a'];
+      if (giNum(d[1]) || d[5] === 1 || d[5] === 0) { s.n++; if ((giNum(d[1]) && d[1] >= PAINFUL_AT) || (!giNum(d[1]) && d[5] === 1)) s.pain++; }
+      if (giNum(d[1])) s.sc.push(d[1]);
+      const rest = [d[2], d[3], d[4]].filter(giNum);
+      if (rest.length) s.rest.push(mean1(rest));
+    });
+    if (S.b.n >= 3 && S.a.n >= 3) {
+      const since = 'Since ' + shortDate(G.omeStart);
+      const pct = (s) => Math.round((100 * s.pain) / s.n);
+      const dp = pct(S.a) - pct(S.b);
+      p.comps.push({ title: 'Omeprazole: mornings with stomach pain', left: { label: 'Before omeprazole', value: S.b.pain + ' of ' + S.b.n, sub: pct(S.b) + '%' }, right: { label: since, value: S.a.pain + ' of ' + S.a.n, sub: pct(S.a) + '%' },
+        verdict: Math.abs(dp) < 10 ? 'About the same' : dp < 0 ? 'Fewer painful mornings since' : 'More painful mornings since', tone: tone(dp, 10) });
+      const mb = mean1(S.b.sc), ma = mean1(S.a.sc);
+      if (mb !== null && ma !== null) {
+        const d = ma - mb;
+        p.comps.push({ title: 'Omeprazole: morning stomach pain, average', left: { label: 'Before', value: mb.toFixed(1) }, right: { label: since, value: ma.toFixed(1) },
+          verdict: Math.abs(d) < 0.5 ? 'About the same' : d < 0 ? 'Lower since' : 'Higher since', tone: tone(d, 0.5) });
+      }
+      const rb = mean1(S.b.rest), ra = mean1(S.a.rest);
+      if (rb !== null && ra !== null) {
+        const d = ra - rb;
+        p.comps.push({ title: 'Omeprazole: rest of the day (afternoon to night)', left: { label: 'Before', value: rb.toFixed(1) }, right: { label: since, value: ra.toFixed(1) },
+          verdict: Math.abs(d) < 0.5 ? 'About the same' : d < 0 ? 'Lower since' : 'Higher since', tone: tone(d, 0.5) });
+      }
+    } else p.comps.push({ title: 'Omeprazole', left: { label: 'Started', value: shortDate(G.omeStart) }, right: { label: 'Logged mornings', value: S.b.n + ' before · ' + S.a.n + ' since' }, verdict: 'Not enough mornings to compare yet', tone: 'same' });
   }
-  const rb = mean1(S.b.rest), ra = mean1(S.a.rest);
-  if (rb !== null && ra !== null) {
-    const d = ra - rb;
-    p.comps.push({ title: 'Rest of the day (afternoon to night), average', left: { label: 'Before', value: rb.toFixed(1) }, right: { label: since, value: ra.toFixed(1) },
-      verdict: Math.abs(d) < 0.5 ? 'About the same' : d < 0 ? 'Lower since' : 'Higher since', tone: Math.abs(d) < 0.5 ? 'same' : d < 0 ? 'better' : 'worse' });
+  // Probiotic: before vs since the current run, then the morning after a probiotic day vs a day without one logged.
+  if (G.proStart || G.proFirst) {
+    const start = G.proStart || G.proFirst;
+    const before = [], since = [];
+    keys.forEach((k) => { const v = G.by[k][1]; if (giNum(v)) (k < start ? before : since).push(v); });
+    avgComp('Probiotic: morning stomach pain, before vs since ' + shortDate(start), before, since, 'Before', 'Since ' + shortDate(start));
+    const after = [], without = [];
+    keys.forEach((k, i) => {
+      if (k < (G.proFirst || start) || i + 1 >= keys.length) return;
+      const next = G.by[keys[i + 1]][1];
+      if (!giNum(next)) return;
+      (G.by[k][6] === 1 ? after : without).push(next);
+    });
+    if (!avgComp('Probiotic: next morning, after a day with vs without it', without, after, 'Without (not logged)', 'After a probiotic day')) {
+      p.comps.push({ title: 'Probiotic: next morning, with vs without', left: { label: 'After probiotic days', value: String(after.length), sub: 'mornings' }, right: { label: 'After days without', value: String(without.length), sub: 'mornings' }, verdict: 'Not enough days without it to compare yet', tone: 'same' });
+    }
+    if (G.omeStart && Math.abs((keyToDate(start) - keyToDate(G.omeStart)) / 86400000) < 21) p.note += ' Probiotic and omeprazole started close together, so their effects overlap.';
   }
+  if (!p.comps.length) p.empty = 'Once omeprazole or the probiotic is logged, this compares mornings before and since.';
   return p;
 }
 function stomachView(T2) {
@@ -2149,27 +2291,19 @@ function stomachView(T2) {
     const v = [d.st, d.b].filter(giNum);
     return v.length ? Math.max.apply(null, v) : null;
   };
-  const end = addDays(today, 6 - ((keyToDate(today).getDay() + 6) % 7));
-  const start = addDays(end, -41);
-  let html = '<h2 class="tr-h">Stomach</h2><div class="tr-cal" aria-label="Stomach calendar, last six weeks">' +
-    ['', 'M', 'T', 'W', 'T', 'F', 'S', 'S'].map((t) => '<span class="tr-dh">' + t + '</span>').join('');
-  for (let w = 0; w < 6; w++) {
-    const ws = addDays(start, w * 7);
-    html += '<span class="tr-wk">' + esc(shortDate(ws)) + '</span>';
-    for (let i = 0; i < 7; i++) {
-      const k = addDays(ws, i), x = by[k], n = keyToDate(k).getDate();
-      if (k > today) { html += '<span class="tr-cell future"></span>'; continue; }
-      const d = x ? x.d : {};
-      const sc = dayScore(k, d);
-      const cls = ['tr-cell'];
-      if (k === today) cls.push('today');
-      if (k === TR.ssel) cls.push('sel');
-      cls.push(sc !== null ? 's' + stomachLevel(sc) : 'empty');
-      html += '<button type="button" class="' + cls.join(' ') + '" data-tr="sday" data-v="' + k + '" aria-label="' + esc(longDate(k)) +
-        (sc !== null ? ', stomach ' + sc : ', no stomach score') + (ome[k] ? ', omeprazole taken' : '') + bowelLabel(d.bx) + '">' + n + (ome[k] ? '<i class="tr-ome"></i>' : '') + bowelMark(d.bx) + '</button>';
-    }
-  }
-  html += '</div><div class="tr-key"><span>Calm</span><span class="tr-ramp"><i class="s0"></i><i class="s1"></i><i class="s2"></i><i class="s3"></i><i class="s4"></i></span><span>Bad</span>' +
+  const firstData = (T2.list.find((x) => dayScore(x.key, x.d) !== null) || {}).key;
+  let html = '<h2 class="tr-h">Stomach</h2>' + calGrid('stomach', 'Stomach calendar', firstData, today, (k) => {
+    const x = by[k], n = keyToDate(k).getDate();
+    const d = x ? x.d : {};
+    const sc = dayScore(k, d);
+    const cls = ['tr-cell'];
+    if (k === today) cls.push('today');
+    if (k === TR.ssel) cls.push('sel');
+    cls.push(sc !== null ? 's' + stomachLevel(sc) : 'empty');
+    return '<button type="button" class="' + cls.join(' ') + '" data-tr="sday" data-v="' + k + '" aria-label="' + esc(longDate(k)) +
+      (sc !== null ? ', stomach ' + sc : ', no stomach score') + (ome[k] ? ', omeprazole taken' : '') + bowelLabel(d.bx) + '">' + n + (ome[k] ? '<i class="tr-ome"></i>' : '') + bowelMark(d.bx) + '</button>';
+  });
+  html += '<div class="tr-key"><span>Calm</span><span class="tr-ramp"><i class="s0"></i><i class="s1"></i><i class="s2"></i><i class="s3"></i><i class="s4"></i></span><span>Bad</span>' +
     '<span><i class="tr-ome inline"></i>Omeprazole</span><span><i class="tr-bm loose inline"></i>Loose (6–7)</span><span><i class="tr-bm hard inline"></i>Hard (1–2)</span></div>' +
     (G ? '<p class="tr-detail muted" style="margin-top:4px">Colour = the day’s average stomach pain.</p>' : '');
   const k = TR.ssel && TR.ssel <= today ? TR.ssel : null;
@@ -2180,7 +2314,9 @@ function stomachView(T2) {
   const when = g ? GI_PARTS.map((name, i) => (giNum(g[i + 1]) ? name.toLowerCase() + ' ' + g[i + 1] : '')).filter(Boolean).join(', ') : '';
   const bits = [g && giNum(g[0]) ? 'stomach pain avg ' + g[0] + (when ? ' (' + when + ')' : '') : giNum(d.st) ? 'stomach pain up to ' + d.st : '',
     giNum(d.b) ? 'bloating up to ' + d.b : '', g && !giNum(g[1]) && g[5] === 1 ? 'woke with stomach pain' : ''].filter(Boolean);
-  const head = '<b>' + esc(longDate(k)) + '</b>' + (bits.length ? ' · ' + esc(bits.join(', ')) : '') + (ome[k] ? ' · omeprazole' : '');
+  const sleepBits = [d.bt ? 'bed ' + d.bt : '', d.wk ? 'woke ' + d.wk : '', d.up ? 'up ' + d.up : ''].filter(Boolean);
+  const head = '<b>' + esc(longDate(k)) + '</b>' + (bits.length ? ' · ' + esc(bits.join(', ')) : '') + (ome[k] ? ' · omeprazole' : '') +
+    (sleepBits.length ? '<br><span class="small">Night before: ' + esc(sleepBits.join(', ')) + (giNum(d.sl) ? ' · ' + d.sl + ' h in bed' : '') + '</span>' : '');
   const det = TR.days[k];
   let body = '';
   if (!det) body = '<p class="small">Loading…</p>';
@@ -2209,7 +2345,10 @@ async function loadDayDetail(k) {
 const bedMinutes = (bt) => { const m = /^(\d{2}):(\d{2})$/.exec(bt || ''); if (!m) return null; const v = Number(m[1]) * 60 + Number(m[2]); return v < 12 * 60 ? v + 1440 : v; };
 const clockText = (mins) => { const v = Math.round(mins) % 1440; return pad(Math.floor(v / 60)) + ':' + pad(v % 60); };
 function sleepView(T2) {
-  const list = T2.list, n = list.length;
+  const list = T2.list.slice(-42), n = list.length;
+  const tipOf = (d) => [longDate(d.key), d.d.bt ? 'bed ' + d.d.bt : '', d.d.wk ? 'woke ' + d.d.wk : '', d.d.up ? 'up ' + d.d.up : '',
+    giNum(d.d.sl) ? d.d.sl + ' h in bed' : '', giNum(d.d.q) ? 'quality ' + d.d.q + '/10' : '', giNum(d.d.z) ? 'disturbed ' + d.d.z + '/5' : ''].filter(Boolean);
+  const hits = (H) => list.map((d, i) => { const t = tipOf(d); return t.length > 1 ? '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (H - 12) + '" class="tr-hit" data-tip="' + esc(t.join(' · ')) + '"/>' : ''; }).join('');
   const W = 360, L = 30, R = 4, bw = (W - L - R) / n;
   const x = (i) => L + i * bw;
   const axis = (H) => '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(list[0].key)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(list[n - 1].key)) + '</text>';
@@ -2222,9 +2361,9 @@ function sleepView(T2) {
       const v = get(d);
       if (typeof v !== 'number') return;
       const h = Math.max(2, (Math.min(v, max) / max) * (base - top));
-      svg += '<rect x="' + (x(i) + 1).toFixed(1) + '" y="' + (base - h).toFixed(1) + '" width="' + Math.max(2, bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.5" class="' + cls + (bad(v) ? ' ' + (cls === 'tr-sleepbar' ? 'poor' : 'short') : '') + '"><title>' + esc(longDate(d.key)) + ': ' + v + unit + '</title></rect>';
+      svg += '<rect x="' + (x(i) + 1).toFixed(1) + '" y="' + (base - h).toFixed(1) + '" width="' + Math.max(2, bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.5" class="' + cls + (bad(v) ? ' ' + (cls === 'tr-sleepbar' ? 'poor' : 'short') : '') + '"/>';
     });
-    return svg + axis(H) + '</svg>';
+    return svg + axis(H) + hits(H) + '</svg>';
   };
   // Bedtime: 21:00 at the top down to 08:00 at the bottom.
   const bedChart = () => {
@@ -2237,15 +2376,50 @@ function sleepView(T2) {
     list.forEach((d, i) => {
       const m = bedMinutes(d.d.bt);
       if (m === null) return;
-      svg += '<circle cx="' + (x(i) + bw / 2).toFixed(1) + '" cy="' + y(m).toFixed(1) + '" r="3" class="tr-beddot' + (m >= 27 * 60 ? ' late' : '') + '"><title>' + esc(longDate(d.key)) + ': bed ' + d.d.bt + '</title></circle>';
+      svg += '<circle cx="' + (x(i) + bw / 2).toFixed(1) + '" cy="' + y(m).toFixed(1) + '" r="3" class="tr-beddot' + (m >= 27 * 60 ? ' late' : '') + '"/>';
     });
-    return svg + axis(H) + '</svg>';
+    return svg + axis(H) + hits(H) + '</svg>';
   };
   return '<h2 class="tr-h">Sleep</h2>' +
     '<div class="tr-sub">Bedtime</div>' + bedChart() +
     '<div class="tr-sub">Hours in bed</div>' + bars((d) => d.d.sl, 12, 'tr-hoursbar', (v) => v < 6, 'Hours in bed per night', ' h') +
     '<div class="tr-sub">Sleep quality</div>' + bars((d) => d.d.q, 10, 'tr-sleepbar', (v) => v <= 5, 'Sleep quality per night', '/10') +
-    patBtn('sleep', 'Sleep patterns');
+    '<p class="small tr-hint">Tap (or hover over) a night for its details.</p>' + patBtn('sleep', 'Sleep patterns');
+}
+
+/* ---------- Medication history: pick a medicine, see every day it was logged (scrollable), and how long you've been on it ---------- */
+function medsView(today) {
+  const data = medCounts();
+  if (!data) return '';
+  const names = Object.keys(data);
+  if (!names.length) return '';
+  const cur = TR.med && data[TR.med] ? TR.med : (names.find((n) => /omeprazole/i.test(n)) || names[0]);
+  const d = data[cur];
+  const taken = Object.keys(d.byDay).filter((k) => d.byDay[k] > 0 && k <= today).sort();
+  const firstKey = taken[0] || today;
+  let html = '<h2 class="tr-h">Medication</h2><div class="tr-chips tr-medchips">' + names.map((n) => '<button type="button" class="tr-chip" data-tr="med" data-v="' + esc(n) + '" aria-pressed="' + (n === cur) + '">' + esc(n) + '</button>').join('') + '</div>';
+  html += calGrid('med-' + cur, cur + ' calendar', firstKey, today, (k) => {
+    const n = d.byDay[k] || 0, day = keyToDate(k).getDate();
+    const cls = ['tr-cell', n ? (d.perDay > 0 && n < d.perDay ? 'mpart' : 'mon') : 'moff'];
+    if (k === today) cls.push('today');
+    const amount = d.mg && n ? (d.mg[k] ? d.mg[k] + (d.unknown[k] ? '+' : '') : '?') : '';
+    return '<span class="' + cls.join(' ') + '" data-tip="' + esc(longDate(k) + ' · ' + (n ? n + (n === 1 ? ' dose' : ' doses') + (amount ? ' · ' + amount + ' mg' : '') : 'none logged')) + '">' + day + (amount ? '<i class="tr-mg">' + amount + '</i>' : '') + '</span>';
+  });
+  // How long: the current run (gaps of up to 3 days allowed), the last 14 days, and the first day in the data.
+  const stats = [];
+  if (taken.length) {
+    const lastK = taken[taken.length - 1];
+    let runStart = lastK;
+    for (let i = taken.length - 2; i >= 0; i--) { if ((keyToDate(runStart) - keyToDate(taken[i])) / 86400000 > 3) break; runStart = taken[i]; }
+    const runDays = Math.round((keyToDate(lastK) - keyToDate(runStart)) / 86400000) + 1;
+    const current = (keyToDate(today) - keyToDate(lastK)) / 86400000 <= 3;
+    stats.push({ label: current ? 'Taking since' : 'Last logged', value: shortDate(current ? runStart : lastK), sub: current ? runDays + (runDays === 1 ? ' day' : ' days') : 'not in the last 3 days' });
+    stats.push({ label: 'Last 14 days', value: Array.from({ length: 14 }, (_, i) => addDays(today, -i)).filter((k) => d.byDay[k] > 0).length + ' of 14', sub: 'days logged' });
+    stats.push({ label: 'First logged', value: shortDate(taken[0]), sub: taken.length + ' days in all' });
+  }
+  html += stats.length ? '<div class="pt-stats tr-medstats">' + stats.map((x) => '<div class="pt-cell"><span>' + esc(x.label) + '</span><b>' + esc(x.value) + '</b><small>' + esc(x.sub) + '</small></div>').join('') + '</div>'
+    : '<p class="small">No ' + esc(cur) + ' logged in the last four months.</p>';
+  return html + '<p class="small tr-hint">Dark = logged' + (d.perDay > 1 ? ', half = some of ' + d.perDay + ' doses' : '') + (d.mg ? ', small number = mg' : '') + '. Counts logged doses only; before 4am counts as the night before.</p>';
 }
 /* Sleep: averages, then the next day's score after early vs late, long vs short, good vs poor nights. */
 function sleepPatterns(T2) {
@@ -2274,6 +2448,8 @@ function sleepPatterns(T2) {
 }
 
 function trendsClick(ev) {
+  const tip = ev.target.closest('[data-tip]');
+  if (tip && !tip.closest('[data-tr]')) { showTip(tip); return; }
   const el = ev.target.closest('[data-tr]');
   if (!el) return;
   const act = el.dataset.tr, v = el.dataset.v;
@@ -2290,6 +2466,7 @@ function trendsClick(ev) {
   }
   else if (act === 'sday') { TR.ssel = TR.ssel === v ? null : v; trendsRender(); if (TR.ssel) loadDayDetail(TR.ssel); }
   else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
+  else if (act === 'med') { TR.med = v; LS.set('trends.med', v); trendsRender(); }
   else if (act === 'pat-close') closePatterns();
   else if (act === 'pair') openSettings('pair');
 }
@@ -2310,7 +2487,7 @@ window.addEventListener('online', () => { logFlush(); inboxFlush(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   logFlush();
-  if (view === 'log') { logRender(); logRefreshConfig(); }
+  if (view === 'log') { logRenderSoft(); logRefreshConfig(); }
   inboxFlush();
   if ((view === 'ahead' || view === 'money') && Conn.paired()) showView(view);
   if (view === 'trends') trendsEnter();
@@ -2321,7 +2498,7 @@ document.addEventListener('visibilitychange', () => {
 });
 setInterval(() => {
   if (document.hidden) return;
-  if (view === 'log' && !S.timeOpen && !S.open && !S.sheet && document.activeElement.tagName !== 'INPUT') logRender();
+  if (view === 'log' && !S.timeOpen && !S.open && !S.sheet) logRenderSoft();
   if (queue.length) logFlush();
 }, 60000);
 
