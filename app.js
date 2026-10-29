@@ -2,7 +2,12 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v20 · 29 Oct';
+/* Older browsers (e.g. e-ink tablets with an old built-in WebView) lack a few newer functions. */
+if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = function () { while (this.firstChild) this.removeChild(this.firstChild); this.append.apply(this, arguments); };
+if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
+if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
+if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
+const APP_VERSION = 'v21 · 29 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -80,7 +85,7 @@ async function api(body) {
 }
 
 async function dash(fn, args) {
-  if (!Conn.paired()) throw new Error('This icon isn’t paired yet.');
+  if (!Conn.paired()) throw new Error('This device isn’t paired yet.');
   const res = await api({ action: 'dash', fn, args: args || [] });
   if (!res || !res.success) {
     const err = new Error((res && res.error) || 'No answer from Google. Try again.');
@@ -96,7 +101,7 @@ function clearSavedCopies() {
 
 function onUnpaired() {
   LS.del('token'); LS.del('device'); clearSavedCopies();
-  toast('This icon was unpaired. Pair it again in Settings.');
+  toast('This device was unpaired. Pair it again in Settings.');
   showView(view === 'settings' ? 'settings' : view);
 }
 
@@ -169,20 +174,20 @@ function settingsRender() {
   const t = themePref();
   const dev = LS.get('device', null);
   const state = Conn.paired()
-    ? 'Paired as <b>' + esc(dev && dev.name ? dev.name : 'this icon') + '</b>.'
-    : Conn.key() ? 'Health log is using the older shared key. Pair this icon to switch on Today and drop the key from this phone.'
+    ? 'Paired as <b>' + esc(dev && dev.name ? dev.name : 'this device') + '</b>.'
+    : Conn.key() ? 'Health log is using the older shared key. Pair this device to switch on Today and drop the key from it.'
       : 'Not paired yet.';
   el.innerHTML =
     '<header><h1>Settings</h1><button type="button" class="log" data-act="done">Done</button></header>' +
     '<h2>APPEARANCE</h2><div class="grid3" role="group" aria-label="Appearance">' +
-      [['light', 'Light'], ['dark', 'Dark'], ['auto', 'Match phone']].map(([v, l]) =>
+      [['light', 'Light'], ['dark', 'Dark'], ['auto', 'Match device']].map(([v, l]) =>
         '<button type="button" class="seg" data-act="theme" data-v="' + v + '" aria-pressed="' + (t === v) + '">' + l + '</button>').join('') + '</div>' +
     '<h2>THIS ICON</h2><div class="notice">' + state +
-      '<div class="row2" style="margin-top:10px"><button type="button" class="seg" data-act="pair-open">' + (Conn.paired() ? 'Pair again' : 'Pair this icon') + '</button>' +
+      '<div class="row2" style="margin-top:10px"><button type="button" class="seg" data-act="pair-open">' + (Conn.paired() ? 'Pair again' : 'Pair this device') + '</button>' +
       (Conn.paired() ? '<button type="button" class="seg" data-act="unpair">' + (unpairArmed ? 'Tap again to unpair' : 'Unpair') + '</button>' : '') + '</div></div>' +
     (Conn.paired() ? '<h2>PAIRED DEVICES</h2>' + devicesMarkup() : '') +
     '<h2>OTHER FILES</h2>' + fileLinks([['Works &amp; Royalties', LINKS.works], ['Inventory', LINKS.inventory], ['Life HQ sheet', LINKS.hqSheet]]) +
-    '<h2>ABOUT</h2><p class="small">Life HQ app ' + esc(APP_VERSION) + '. Each Home Screen icon is paired on its own. Pages show saved copies instantly, then refresh. Health records go straight to your health tracker.</p>' +
+    '<h2>ABOUT</h2><p class="small">Life HQ app ' + esc(APP_VERSION) + '. Each device is paired on its own. Pages show saved copies instantly, then refresh. Health records go straight to your health tracker.</p>' +
     '<div class="row2"><button type="button" class="seg" data-act="update">Check for update</button><button type="button" class="seg" id="test-celebration" data-act="celebrate">Test celebration</button></div>';
   if (Conn.paired() && devices === null && !devicesError) loadDevices();
 }
@@ -191,7 +196,7 @@ function devicesMarkup() {
   if (devicesError) return '<p class="small">' + esc(devicesError) + '</p>';
   if (!devices) return '<p class="small">Loading…</p>';
   const me = (LS.get('device', null) || {}).id;
-  return devices.map((d) => '<div class="dev"><span>' + esc(d.name) + '<small>' + (d.id === me ? 'This icon · ' : '') + 'last used ' + esc(d.lastUsed || '–') + '</small></span>' +
+  return devices.map((d) => '<div class="dev"><span>' + esc(d.name) + '<small>' + (d.id === me ? 'This device · ' : '') + 'last used ' + esc(d.lastUsed || '–') + '</small></span>' +
     (d.id === me ? '' : '<button type="button" class="link-btn" data-act="revoke" data-v="' + esc(d.id) + '">Unpair</button>') + '</div>').join('') +
     '<p class="small" style="margin-top:8px">Unpair anything you don’t recognise. Pairings are also listed in Life HQ › Device access.</p>';
 }
@@ -206,14 +211,14 @@ async function loadDevices() {
 }
 
 function pairMarkup() {
-  return '<header><h1>Pair this icon</h1><button type="button" class="seg" data-act="pair-cancel" style="padding:0 14px">Cancel</button></header>' +
+  return '<header><h1>Pair this device</h1><button type="button" class="seg" data-act="pair-cancel" style="padding:0 14px">Cancel</button></header>' +
     '<form id="pair-form" class="stack">' +
     '<p>On your Mac: open the <b>Ru - Inbox Receiver</b> script, choose <b>pairNewDevice</b> in the function menu and press <b>Run</b>. Copy the line starting <b>HQ1.</b> from the log and paste it here.</p>' +
-    '<p class="small">A code works for 15 minutes, for up to two icons. Each Home Screen icon needs pairing once.</p>' +
+    '<p class="small">A code works for 15 minutes, for up to two devices. Each device needs pairing once.</p>' +
     '<label for="pair-code">Setup code</label>' +
     '<input id="pair-code" class="text-input code" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="HQ1.…">' +
     (navigator.clipboard && navigator.clipboard.readText ? '<button type="button" class="seg" data-act="paste">Paste</button>' : '') +
-    '<label for="pair-name">Name for this icon</label>' +
+    '<label for="pair-name">Name for this device</label>' +
     '<input id="pair-name" class="text-input" type="text" maxlength="40" autocomplete="off" value="' + esc(defaultDeviceName()) + '">' +
     '<button type="submit" class="log wide" id="pair-btn" style="margin-top:12px">Pair</button></form>';
 }
@@ -354,8 +359,7 @@ function trialView() {
     return '<section class="trial tappable" data-act="plan-open" role="button" tabindex="0" aria-label="Medication plan">' +
       '<div class="trial-top"><span>CURRENT STEP</span>' + (cur.to ? '<span>ends ' + esc(shortDate(cur.to)) + '</span>' : '') + '</div>' +
       '<div class="trial-name">' + esc(cur.label) + ' · day ' + d + (len ? ' of ' + len : '') + '</div>' +
-      (next ? '<div class="trial-focus">Next: ' + esc(next.label.replace(/^\d+\s*·\s*/, '')) + ' from ' + esc(longDate(next.from)) + '</div>' : '') +
-      '<div class="trial-more">See the whole plan ›</div></section>';
+      '</section>';
   }
   const now = new Date();
   const today = dayKey(now);
@@ -370,8 +374,6 @@ function trialView() {
     (t.focus ? '<div class="trial-focus">Focus: ' + esc(t.focus) + '</div>' : '') +
     (showBtn ? '<button type="button" class="trial-btn" data-act="trial">' + esc(t.button) + '</button>' : '') +
     (doneAt && t.button ? '<div class="trial-today">' + esc(t.button.replace(/ now$/i, '')) + ' at ' + esc(doneAt) + ' · logged</div>' : '') +
-    (next ? '<div class="trial-focus">Next: ' + esc(next.label.replace(/^\d+\s*·\s*/, '')) + ' from ' + esc(longDate(next.from)) + '</div>' : '') +
-    (steps.length ? '<div class="trial-more">See the whole plan ›</div>' : '') +
     '</section>';
 }
 
@@ -537,7 +539,7 @@ function checkinView() {
   const last = cfg.today.lastCheckin ? 'Last: ' + cfg.today.lastCheckin.toLowerCase() : 'None yet today';
   let html = '<section class="card" aria-label="Check-in"><div class="check-row">' +
     '<button type="button" class="check-toggle" data-act="toggle" aria-expanded="' + S.open + '" aria-controls="check-body">' +
-    '<span aria-hidden="true"></span><span><h2>Check-in</h2><span class="sub">' + (S.open ? 'Leave anything blank you didn’t notice' : esc(last)) + '</span></span>' +
+    '<span aria-hidden="true"></span><span><h2>Check-in</h2><span class="sub">' + (S.open ? '' : esc(last)) + '</span></span>' +
     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button></div>';
   if (S.open) {
     const stage = S.stage || guessStage();
@@ -556,6 +558,7 @@ function checkinView() {
       }).join('') + '</div>' +
       (period === 'Wake' ? '<div class="sleep-times" role="group" aria-label="Sleep times">' + [['bed', 'Went to sleep'], ['wake', 'Woke'], ['up', 'Got up']].map(([k, l]) =>
         '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') + '</div>' : '') +
+      momentsView() +
       '<input type="text" data-field="checkNote" value="' + esc(S.checkNote) + '" placeholder="Note (optional)" aria-label="Check-in note" autocomplete="off">' +
       '<button type="button" class="log wide" id="check-save" data-act="checkin"></button></div>';
   }
@@ -585,8 +588,8 @@ function logRender() {
     (Conn.canLog() ? '<button type="button" class="icon-btn' + (S.refreshing ? ' busy' : '') + '" data-act="refresh" aria-label="Refresh"' + (S.refreshing ? ' aria-busy="true"' : '') + '>' + REFRESH_SVG + '</button>' : '') +
     '<button type="button" class="icon-btn" data-act="settings" aria-label="Settings">' + GEAR + '</button></div></div><h1 class="page-title">Log</h1>';
   if (!Conn.canLog()) {
-    app.innerHTML = head('') + '<div class="notice">Pair this icon once to start logging. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
-      '<button type="button" class="log wide" data-act="pair">Pair this icon</button></div>';
+    app.innerHTML = head('') + '<div class="notice">Pair this device once to start logging. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
+      '<button type="button" class="log wide" data-act="pair">Pair this device</button></div>';
     return;
   }
   const now = new Date();
@@ -599,7 +602,7 @@ function logRender() {
     head('') +
     // The time pill floats at the top while you scroll; the panel opens here, or inside a sheet when one is open.
     '<div class="time-bar">' + timePill(timeLabel) + '</div>' + (S.timeOpen && !S.sheet ? timePanel(now) : '') +
-    trialView() + logInboxView() + checkinView() + quickView() + momentsView() +
+    trialView() + logInboxView() + checkinView() + quickView() +
     (waiting ? '<div class="queue-note"><span>' + waiting + ' waiting to send</span><button type="button" class="link-btn" data-act="flush">Send now</button></div>' : '') +
     (rows.length || failed.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + missingRows().map((m) =>
       '<div class="lrow warn"><span class="t">' + esc(m.r.hm) + '</span><span>' + esc(m.miss.join(', ')) + ' not in the sheet</span><button type="button" class="link-btn" data-act="readd" data-v="' + esc(m.r.id) + '">Re-add</button></div>').join('') + rows.map((r) =>
@@ -945,15 +948,15 @@ async function logFlush() {
       let res;
       try { res = await api(Object.assign({ action: 'log' }, entry)); } catch (e) { res = null; }
       if (res && res.success) { queue.shift(); setStatus(entry.entryId, 'saved'); saved++; continue; }
-      if (res && res.auth === false) { failedMsg = 'Not sent: this icon needs pairing again (Settings).'; break; }
+      if (res && res.auth === false) { failedMsg = 'Not sent: this device needs pairing again (Settings).'; break; }
       if (res && res.permanent) { queue.shift(); setStatus(entry.entryId, 'failed', res.error); failedMsg = res.error || 'Not saved'; continue; }
-      if (res && res.error === 'Not authorised.') { failedMsg = 'Key not accepted. Pair this icon in Settings.'; }
+      if (res && res.error === 'Not authorised.') { failedMsg = 'Key not accepted. Pair this device in Settings.'; }
       break;
     }
   } finally { sending = false; saveLocal(); }
   if (failedMsg) toast(failedMsg);
   else if (saved && $('toast').hidden) toast('Saved ✓');
-  else if (queue.length && !navigator.onLine) toast('Saved on phone · will send when online');
+  else if (queue.length && !navigator.onLine) toast('Saved on this device · will send when online');
   if (saved) logRefreshConfig();
   logRenderSoft();
 }
@@ -1166,8 +1169,8 @@ function todayMarkup() {
       '<p class="muted" id="date">&nbsp;</p><button id="back-to-today" type="button" hidden>Back to today</button>' +
       '<div class="stale" id="stale"></div>' +
       '<button type="button" id="tomorrow-ready" class="tomorrow-ready" hidden>Tomorrow’s plan is ready ›</button></div>' +
-    '<div id="pair-prompt" class="notice pair-prompt" hidden>Pair this icon once to see your day here. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
-      '<button type="button" class="log wide" id="pair-today">Pair this icon</button></div>' +
+    '<div id="pair-prompt" class="notice pair-prompt" hidden>Pair this device once to see your day here. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
+      '<button type="button" class="log wide" id="pair-today">Pair this device</button></div>' +
     '<div id="today-body">' +
     '<div id="message" class="status" role="status" aria-live="polite"></div>' +
     '<div id="extras-status" class="status" role="status" aria-live="polite"></div>' +
@@ -1371,11 +1374,14 @@ function completeTodoist(id, check, row, after) {
   if (isCompleting(id)) return;
   row = row || (check.closest && check.closest('.ahead-row'));
   if (row) row.classList.add('done');
+  // The celebration shows straight away with an Undo button; the completion is sent to Todoist when
+  // the window closes (or after 2 minutes if it's left open).
+  const send = () => { if (!pendingDone[id]) return; clearTimeout(pendingDone[id].t); delete pendingDone[id]; completeTodoistNow(id, check, row, after); };
   pendingDone[id] = {
-    t: setTimeout(() => { delete pendingDone[id]; completeTodoistNow(id, check, row, after); }, UNDO_MS),
-    undo: () => { clearTimeout(pendingDone[id].t); delete pendingDone[id]; check.checked = false; check.disabled = false; if (row) row.classList.remove('done'); document.querySelectorAll('input[type=checkbox][data-task="' + id + '"]').forEach((c) => { c.checked = false; }); toast('Not completed'); }
+    t: setTimeout(send, 120000), send,
+    undo: () => { clearTimeout(pendingDone[id].t); delete pendingDone[id]; check.checked = false; check.disabled = false; if (row) row.classList.remove('done'); document.querySelectorAll('input[type=checkbox][data-task="' + id + '"]').forEach((c) => { c.checked = false; }); }
   };
-  toast('Completed', 'task:' + id);
+  try { celebrateCompletion(id); } catch (e) { send(); }
 }
 async function completeTodoistNow(id, check, row, after) {
   if (T.completing.has(id)) return;
@@ -1396,7 +1402,6 @@ async function completeTodoistNow(id, check, row, after) {
     if (after) after();
     if ($('next-days') && after !== loadNextFewDays && T.aheadAt) loadNextFewDays();
     message('Completed in Todoist.', 5000);
-    try { celebrateCompletion(); } catch (e) {}
   } catch (e) {
     T.completing.delete(id);
     check.checked = false; check.disabled = false;
@@ -1477,7 +1482,7 @@ function renderInboxQueue() {
   const el = $('inbox-queue');
   if (!el) return;
   el.hidden = !inboxQueue.length;
-  el.innerHTML = inboxQueue.length ? '<span>' + inboxQueue.length + ' inbox entr' + (inboxQueue.length === 1 ? 'y' : 'ies') + ' saved on this phone, waiting to send</span><button type="button" class="link-btn" id="inbox-send">Send now</button>' : '';
+  el.innerHTML = inboxQueue.length ? '<span>' + inboxQueue.length + ' inbox entr' + (inboxQueue.length === 1 ? 'y' : 'ies') + ' saved on this device, waiting to send</span><button type="button" class="link-btn" id="inbox-send">Send now</button>' : '';
   if (inboxQueue.length) $('inbox-send').onclick = () => inboxFlush(true);
 }
 function queueInbox(text, origin) {
@@ -1491,14 +1496,14 @@ function saveInbox(event) {
   if (!text.trim()) { $('log-status').textContent = 'Enter something to save.'; return; }
   queueInbox(text, 'today');
   $('log-text').value = '';
-  $('log-status').textContent = navigator.onLine ? 'Sending…' : 'Saved on this phone · will send when online.';
+  $('log-status').textContent = navigator.onLine ? 'Sending…' : 'Saved on this device · will send when online.';
   renderInboxQueue();
   inboxFlush(true);
 }
 async function inboxFlush(manual) {
   if (inboxSending || !inboxQueue.length || !Conn.paired()) return;
   if (!navigator.onLine) {
-    if (manual && $('log-status')) $('log-status').textContent = 'Saved on this phone · will send when online.';
+    if (manual && $('log-status')) $('log-status').textContent = 'Saved on this device · will send when online.';
     if (manual) setLogInboxStatus('Waiting to send (' + inboxQueue.length + ')');
     return;
   }
@@ -1515,7 +1520,7 @@ async function inboxFlush(manual) {
         LS.set('inboxQueue', inboxQueue);
       } catch (e) {
         if (!e.permanent) {
-          problem = 'Saved on this phone · couldn’t reach Google yet. It will retry.';
+          problem = 'Saved on this device · couldn’t reach Google yet. It will retry.';
           logProblem = 'Waiting to send (' + inboxQueue.length + ')';
           break;
         }
@@ -1600,8 +1605,8 @@ function pageHead(name, title) {
     '<button type="button" class="icon-btn" id="' + name + '-refresh" aria-label="Refresh">' + REFRESH_SVG + '</button>' +
     '<button type="button" class="icon-btn" id="' + name + '-settings" aria-label="Settings">' + GEAR + '</button></div></div>' +
     '<h1 class="page-title">' + title + '</h1>' +
-    '<div id="' + name + '-pair" class="notice pair-prompt" hidden>Pair this icon once to see this page. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
-    '<button type="button" class="log wide" id="' + name + '-pair-btn">Pair this icon</button></div>';
+    '<div id="' + name + '-pair" class="notice pair-prompt" hidden>Pair this device once to see this page. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
+    '<button type="button" class="log wide" id="' + name + '-pair-btn">Pair this device</button></div>';
 }
 function pageEnter(name, title, panelId, after, load, stampKey) {
   const el = $(name + '-view');
@@ -1935,7 +1940,11 @@ const CELEBRATION = { figures: ['Dean Gaffney', 'Les Dennis', 'Rustie Lee', 'Che
   middles: ['multiply by jazz', 'divide doubt by toast', 'carry the imaginary pigeon', 'subtract the spare Tuesday', 'factorise your trousers', 'differentiate the teapot', 'square the tiny victory', 'solve for mild thunder'],
   endings: ['and proceed diagonally.', 'QED, darling.', 'the crumpet is yours.', 'hence, magnificent.', 'and call it progress.', 'the ducks approve.', 'therefore, onwards.', 'one less thing.'] };
 let lastRewardFigure = '';
-function closeReward() { $('reward').hidden = true; $('reward').replaceChildren(); }
+function closeReward() {
+  const id = $('reward').dataset.task;
+  $('reward').hidden = true; $('reward').replaceChildren(); $('reward').dataset.task = '';
+  if (id && pendingDone[id]) pendingDone[id].send();
+}
 document.addEventListener('click', (event) => {
   const reward = $('reward');
   if (!reward.hidden && !reward.contains(event.target) && !(event.target.id === 'test-celebration')) {
@@ -1943,7 +1952,7 @@ document.addEventListener('click', (event) => {
   }
 }, true);
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('reward').hidden) closeReward(); });
-function celebrateCompletion() {
+function celebrateCompletion(taskId) {
   completionPop();
   const pick = (values) => values[Math.floor(Math.random() * values.length)];
   const available = CELEBRATION.figures.filter((n) => n !== lastRewardFigure);
@@ -1959,6 +1968,12 @@ function celebrateCompletion() {
   caption.textContent = '“' + pick(CELEBRATION.openings) + ', ' + pick(CELEBRATION.middles) + ', ' + pick(CELEBRATION.endings) + '”';
   const attribution = document.createElement('div'); attribution.className = 'reward-attribution'; attribution.textContent = '— ' + figure;
   card.append(close, mark, caption, attribution);
+  $('reward').dataset.task = taskId || '';
+  if (taskId) {
+    const undo = document.createElement('button'); undo.type = 'button'; undo.className = 'reward-undo'; undo.textContent = 'Undo';
+    undo.onclick = (e) => { e.preventDefault(); e.stopPropagation(); const p = pendingDone[taskId]; if (p) p.undo(); $('reward').dataset.task = ''; closeReward(); };
+    card.appendChild(undo);
+  }
   reward.appendChild(card);
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     for (let i = 0; i < 8; i++) {
@@ -2137,7 +2152,7 @@ function trendsRender() {
   if (!body) return;
   const T2 = trendsDays();
   if (!T2) {
-    if (!Conn.canLog()) body.innerHTML = '<div class="notice">Pair this icon once to see your health trends.<button type="button" class="log wide" data-tr="pair">Pair this icon</button></div>';
+    if (!Conn.canLog()) body.innerHTML = '<div class="notice">Pair this device once to see your health trends.<button type="button" class="log wide" data-tr="pair">Pair this device</button></div>';
     else if (TR.loading) body.innerHTML = '<p class="small tr-center">Loading your check-ins…</p>';
     else body.innerHTML = '<div class="notice">This page needs the receiver update (HealthLog v6). Once it’s deployed, this page fills in by itself.</div>';
     return;

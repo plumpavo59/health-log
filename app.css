@@ -577,3 +577,11 @@ table.cmp td.pt-v{display:table-cell;font-size:12px}
 .tr-kmo{display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #d99200;margin-right:4px;vertical-align:middle}
 .tv .task-text{flex:1;min-width:0;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
 .inline-link{color:inherit;text-decoration:underline;text-underline-offset:2px}
+
+/* v21 */
+.trial-focus{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.reward-undo{display:block;margin:14px auto 0;min-height:42px;padding:0 22px;border:1px solid currentColor;border-radius:21px;background:transparent;color:inherit;font:inherit;font-size:15px;font-weight:600}
+.sheet-backdrop{top:0;left:0;right:0;bottom:0}
+/* iPhone: keep the tab bar pinned to the bottom while scrolling (stops it drifting after bounce-scrolls) */
+html,body{overscroll-behavior-y:none}
+#tabbar{-webkit-transform:translate3d(0,0,0);transform:translate3d(0,0,0);will-change:transform}
