@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v22 · 29 Oct';
+const APP_VERSION = 'v23 · 29 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -113,8 +113,14 @@ function defaultDeviceName() {
 }
 
 /* ================= views ================= */
-let view = null, lastMainView = START;
+/* Tabs on this device (Settings): e.g. only Today and Ahead on the e-ink tablet. Hidden tabs never load. */
+const ALL_TABS = [['today', 'Today'], ['ahead', 'Ahead'], ['money', 'Money'], ['trends', 'Health'], ['log', 'Log']];
+const tabsOn = () => { const t = LS.get('tabs', null); const ok = Array.isArray(t) ? t.filter((x) => ALL_TABS.some(([k]) => k === x)) : []; return ok.length ? ok : ALL_TABS.map(([k]) => k); };
+const tabOn = (v) => tabsOn().includes(v);
+function applyTabs() { document.querySelectorAll('#tabbar [data-tab]').forEach((b) => { b.hidden = !tabOn(b.dataset.tab); }); }
+let view = null, lastMainView = tabOn(START) ? START : tabsOn()[0];
 function showView(v) {
+  if (v !== 'settings' && !tabOn(v)) v = tabsOn()[0];
   view = v;
   // Pop-ups belong to their page: close them when moving to another tab.
   if (v !== 'log') S.sheet = null;
@@ -182,7 +188,10 @@ function settingsRender() {
     '<h2>APPEARANCE</h2><div class="grid3" role="group" aria-label="Appearance">' +
       [['light', 'Light'], ['dark', 'Dark'], ['auto', 'Match device']].map(([v, l]) =>
         '<button type="button" class="seg" data-act="theme" data-v="' + v + '" aria-pressed="' + (t === v) + '">' + l + '</button>').join('') + '</div>' +
-    '<h2>THIS ICON</h2><div class="notice">' + state +
+    '<h2>TABS ON THIS DEVICE</h2><div class="chips" role="group" aria-label="Tabs on this device">' + ALL_TABS.map(([k, l]) =>
+      '<button type="button" class="chip" data-act="tab-toggle" data-v="' + k + '" aria-pressed="' + tabOn(k) + '"><b>' + l + '</b></button>').join('') + '</div>' +
+      '<p class="small">Hidden tabs don’t load at all, so a slow device (like the e-ink tablet) stays quick. Only this device changes.</p>' +
+    '<h2>THIS DEVICE</h2><div class="notice">' + state +
       '<div class="row2" style="margin-top:10px"><button type="button" class="seg" data-act="pair-open">' + (Conn.paired() ? 'Pair again' : 'Pair this device') + '</button>' +
       (Conn.paired() ? '<button type="button" class="seg" data-act="unpair">' + (unpairArmed ? 'Tap again to unpair' : 'Unpair') + '</button>' : '') + '</div></div>' +
     (Conn.paired() ? '<h2>PAIRED DEVICES</h2>' + devicesMarkup() : '') +
@@ -250,6 +259,12 @@ async function settingsAct(el) {
   const act = el.dataset.act, v = el.dataset.v;
   if (act === 'done') { unpairArmed = false; showView(lastMainView); }
   else if (act === 'theme') { setTheme(v); settingsRender(); }
+  else if (act === 'tab-toggle') {
+    const on = tabsOn();
+    const next = on.includes(v) ? on.filter((x) => x !== v) : ALL_TABS.map(([k]) => k).filter((k) => on.includes(k) || k === v);
+    if (!next.length) { toast('Keep at least one tab.'); return; }
+    LS.set('tabs', next); applyTabs(); if (!next.includes(lastMainView)) lastMainView = next[0]; settingsRender();
+  }
   else if (act === 'pair-open') { settingsMode = 'pair'; settingsRender(); }
   else if (act === 'pair-cancel') { settingsMode = 'settings'; showView(lastMainView); }
   else if (act === 'paste') { try { $('pair-code').value = (await navigator.clipboard.readText()).trim(); } catch (e) { toast('Couldn’t paste. Long-press the box and choose Paste.'); } }
@@ -2731,6 +2746,7 @@ document.addEventListener('visibilitychange', () => {
   logFlush();
   if (view === 'log') { logRenderSoft(); logRefreshConfig(); }
   inboxFlush();
+  // (hidden tabs are never the current view, so nothing below loads for them)
   if ((view === 'ahead' || view === 'money') && Conn.paired()) showView(view);
   if (view === 'trends') trendsEnter();
   if (view === 'today' && Conn.paired()) {
@@ -2744,8 +2760,9 @@ setInterval(() => {
   if (queue.length) logFlush();
 }, 60000);
 
-showView(START);
-if (Conn.canLog()) { logFlush(); logRefreshConfig(); }
+applyTabs();
+showView(tabOn(START) ? START : tabsOn()[0]);
+if (Conn.canLog() && (tabOn('log') || tabOn('trends'))) { logFlush(); logRefreshConfig(); }
 
 if ('serviceWorker' in navigator) {
   let reloaded = false;
