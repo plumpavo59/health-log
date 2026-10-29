@@ -2,7 +2,7 @@
    Each Home Screen icon opens on its own tab and is paired separately (iPhone keeps
    each icon's storage apart). Talks only to the Ru - Inbox Receiver script. */
 'use strict';
-const APP_VERSION = 'v19 · 29 Oct';
+const APP_VERSION = 'v20 · 29 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -143,7 +143,20 @@ function toast(text, undoId) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { $('toast').hidden = true; }, undoId ? UNDO_MS : 3000);
 }
-$('toast-btn').addEventListener('click', () => { const id = $('toast-btn').dataset.v; if (id) logUndo(id); });
+$('toast-btn').addEventListener('click', () => {
+  const id = $('toast-btn').dataset.v;
+  if (id && id.indexOf('task:') === 0) { const p = pendingDone[id.slice(5)]; if (p) p.undo(); $('toast').hidden = true; }
+  else if (id) logUndo(id);
+});
+/* Text with web links made clickable (tasks): plain text nodes, so nothing is treated as HTML. */
+function linkified(text) {
+  const frag = document.createDocumentFragment();
+  String(text || '').split(/(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g).forEach((part, i) => {
+    if (i % 2) { const a = document.createElement('a'); a.href = part; a.target = '_blank'; a.rel = 'noopener'; a.className = 'inline-link'; a.textContent = part.replace(/^https?:\/\/(www\.)?/, '').slice(0, 48) + (part.length > 56 ? '…' : ''); frag.appendChild(a); }
+    else if (part) frag.appendChild(document.createTextNode(part));
+  });
+  return frag;
+}
 
 const GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
 
@@ -263,7 +276,7 @@ const FALLBACK = {
   foods: ['Green apple', 'Dark chocolate', 'Cashews', 'Onigiri', 'Samosa', 'Coffee with oat milk', 'Chai with oat milk'],
   trial: null, today: { meds: {}, wakeAt: '', lastCheckin: '' }
 };
-const SCALES = [['pain', 'Pain'], ['stiff', 'Stiffness'], ['fatigue', 'Fatigue'], ['fog', 'Brain fog'], ['headache', 'Headache'],
+const SCALES = [['pain', 'Pain'], ['stiff', 'Stiffness'], ['fatigue', 'Fatigue'], ['clarity', 'Mental clarity'], ['headache', 'Headache'],
   ['mood', 'Mood'], ['bloat', 'Bloating'], ['stomach', 'Stomach pain'], ['screen', 'Screen time']];
 const SLEEP = [['sleepq', 'Sleep quality', 10], ['disturb', 'Sleep disturbed', 5]];
 const DAY_START_HOUR = 4;
@@ -280,15 +293,19 @@ let queue = LS.get('queue', []);
 const pending = {};
 let sending = false;
 
+/* Wake check-ins come in two stages: in bed (Period Wake) and getting up (Period Getting up). */
+const wokeToday = () => !!(cfg.today && cfg.today.wakeAt) || recent.some((r) => r.hday === healthKey(new Date()) && r.wake && r.status !== 'failed');
+const upToday = () => !!(cfg.today && cfg.today.upAt) || recent.some((r) => r.hday === healthKey(new Date()) && r.up && r.status !== 'failed');
 function guessPeriod() {
   const now = new Date(), h = now.getHours(), mins = h * 60 + now.getMinutes();
   if (mins >= 23 * 60 + 30 || h < 4) return 'Bed';
-  if (h < 14 && !cfg.today.wakeAt && !recent.some((r) => r.day === dayKey(new Date()) && r.wake)) return 'Wake';
+  if (h < 14 && !upToday()) return 'Wake';
   return 'Day';
 }
+const guessStage = () => (wokeToday() ? 'up' : 'bed');
 
 const S = {
-  open: false, period: null, scores: {}, checkNote: '', calMed: null,
+  open: false, period: null, stage: null, scores: {}, checkNote: '', calMed: null, moment: null, momentNote: '',
   bristol: null, size: null, urgent: false, bowelNote: '',
   meds: [], doses: {}, food: '', time: null, timeOpen: false,
   sheet: null, sheetFresh: false, refreshing: false, inboxText: '', inboxStatus: '', dirty: false,
@@ -327,7 +344,19 @@ function doseMg(dose) {
 
 function trialView() {
   const t = cfg.trial;
-  if (!t || !t.name) return '';
+  const tk = healthKey(new Date());
+  const steps = planSteps();
+  const cur = steps.find((x) => x.from <= tk && (!x.to || x.to >= tk));
+  const next = steps.find((x) => x.from > tk);
+  if ((!t || !t.name) && !cur) return '';
+  if (!t || !t.name) {
+    const d = dayNum(cur.from, tk), len = cur.to ? dayNum(cur.from, cur.to) : 0;
+    return '<section class="trial tappable" data-act="plan-open" role="button" tabindex="0" aria-label="Medication plan">' +
+      '<div class="trial-top"><span>CURRENT STEP</span>' + (cur.to ? '<span>ends ' + esc(shortDate(cur.to)) + '</span>' : '') + '</div>' +
+      '<div class="trial-name">' + esc(cur.label) + ' · day ' + d + (len ? ' of ' + len : '') + '</div>' +
+      (next ? '<div class="trial-focus">Next: ' + esc(next.label.replace(/^\d+\s*·\s*/, '')) + ' from ' + esc(longDate(next.from)) + '</div>' : '') +
+      '<div class="trial-more">See the whole plan ›</div></section>';
+  }
   const now = new Date();
   const today = dayKey(now);
   const localDone = recent.find((r) => r.day === today && r.kind === 'trial' && r.status !== 'failed');
@@ -335,13 +364,106 @@ function trialView() {
   const woke = cfg.today.wakeAt || recent.some((r) => r.day === today && r.wake && r.status !== 'failed');
   const inWindow = hm(now) >= (t.from || '00:00') && hm(now) <= (t.until || '23:59');
   const showBtn = t.button && !doneAt && inWindow && (!t.needsWake || woke);
-  return '<section class="trial" aria-label="Current trial">' +
+  return '<section class="trial' + (steps.length ? ' tappable" data-act="plan-open" role="button" tabindex="0' : '') + '" aria-label="Current trial">' +
     '<div class="trial-top"><span>CURRENT TRIAL</span>' + (t.ends ? '<span>ends ' + esc(t.ends) + '</span>' : '') + '</div>' +
     '<div class="trial-name">' + esc(t.name) + (t.day ? ' · day ' + esc(t.day) + (t.length ? ' of ' + esc(t.length) : '') : '') + '</div>' +
     (t.focus ? '<div class="trial-focus">Focus: ' + esc(t.focus) + '</div>' : '') +
     (showBtn ? '<button type="button" class="trial-btn" data-act="trial">' + esc(t.button) + '</button>' : '') +
     (doneAt && t.button ? '<div class="trial-today">' + esc(t.button.replace(/ now$/i, '')) + ' at ' + esc(doneAt) + ' · logged</div>' : '') +
+    (next ? '<div class="trial-focus">Next: ' + esc(next.label.replace(/^\d+\s*·\s*/, '')) + ' from ' + esc(longDate(next.from)) + '</div>' : '') +
+    (steps.length ? '<div class="trial-more">See the whole plan ›</div>' : '') +
     '</section>';
+}
+
+/* ---------- Medication plan (Meds → PLAN, via HealthLog v13) ---------- */
+const planSteps = () => (cfg.plan && Array.isArray(cfg.plan.steps) ? cfg.plan.steps : []);
+const dayNum = (a, b) => Math.round((keyToDate(b) - keyToDate(a)) / 86400000) + 1;
+function stepState(st, today) {
+  if (st.to && st.to < today) return 'done';
+  if (st.from <= today && (!st.to || st.to >= today)) return 'now';
+  return /propos/i.test(st.status || '') ? 'proposed' : 'next';
+}
+/* The days a step is judged on: its last 7 days when it runs 10+ days (the days before are "settling":
+   the body is still adjusting to the change before it); otherwise the whole step. */
+function stepWindow(st, today) {
+  const end0 = st.to && st.to < today ? st.to : today;
+  if (end0 < st.from) return null;
+  const len = st.to ? dayNum(st.from, st.to) : dayNum(st.from, end0);
+  const settle = len >= 10 ? len - 7 : 0;
+  const winStart = settle ? addDays(st.from, settle) : st.from;
+  return { start: winStart > end0 ? null : winStart, end: end0, settleEnd: settle ? addDays(st.from, settle - 1) : null, len };
+}
+function planHtml(today, withCompare) {
+  const steps = planSteps();
+  if (!steps.length) return '<p class="small">No plan found. It comes from the health tracker’s Meds tab (PLAN), via the receiver update HealthLog v13.</p>';
+  const lastEnd = steps.reduce((m, x) => (x.to && x.to > m ? x.to : m), steps[0].from);
+  const end = addDays(steps.some((x) => !x.to) ? addDays(lastEnd, 14) : lastEnd, 1);
+  const start = steps[0].from;
+  const span = dayNum(start, end);
+  const W = 360, L = 4, R = 4, rowH = 28, top = 6, H = top + steps.length * rowH + 16;
+  const X = (k) => L + ((dayNum(start, k) - 1) / span) * (W - L - R);
+  let svg = '<svg class="tr-chart plan-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Medication plan timeline">' +
+    '<defs><pattern id="plan-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" class="plan-hatch-bg"/><line x1="0" y1="0" x2="0" y2="4" class="plan-hatch-line"/></pattern></defs>';
+  // month ticks
+  let m = keyToDate(start); m = new Date(m.getFullYear(), m.getMonth() + 1, 1);
+  while (dayKey(m) < end) { const k = dayKey(m); svg += '<line x1="' + X(k).toFixed(1) + '" x2="' + X(k).toFixed(1) + '" y1="2" y2="' + (H - 12) + '" class="tr-bedline"/><text x="' + (X(k) + 2).toFixed(1) + '" y="' + (H - 2) + '" class="tr-ax">' + esc(m.toLocaleDateString('en-GB', { month: 'short' })) + '</text>'; m = new Date(m.getFullYear(), m.getMonth() + 1, 1); }
+  steps.forEach((st, i) => {
+    const y = top + i * rowH, state = stepState(st, today);
+    const to = st.to || addDays(lastEnd, 14);
+    const x1 = X(st.from), x2 = Math.max(x1 + 3, X(addDays(to, 1)));
+    const w = stepWindow(st, today) || (st.to && dayNum(st.from, st.to) >= 10 ? { settleEnd: addDays(st.from, dayNum(st.from, st.to) - 8) } : {});
+    svg += '<text x="' + Math.min(x1, W - 150).toFixed(1) + '" y="' + (y + 9) + '" class="tr-ax plan-lab">' + esc(st.label) + '</text>';
+    svg += '<rect x="' + x1.toFixed(1) + '" y="' + (y + 12) + '" width="' + (x2 - x1).toFixed(1) + '" height="10" rx="3" class="plan-bar ' + state + (st.to ? '' : ' open') + '"/>';
+    if (w.settleEnd && st.to) svg += '<rect x="' + x1.toFixed(1) + '" y="' + (y + 12) + '" width="' + Math.max(0, X(addDays(w.settleEnd, 1)) - x1).toFixed(1) + '" height="10" rx="3" class="plan-settle"/>';
+    svg += '<rect x="' + x1.toFixed(1) + '" y="' + y + '" width="' + (x2 - x1).toFixed(1) + '" height="' + rowH + '" class="tr-hit" data-tip="' + esc(st.label + ' · ' + longDate(st.from) + (st.to ? ' – ' + longDate(st.to) : ' onwards') + (st.length ? ' · ' + st.length : '') + ' · ' + (st.status || state)) + '"/>';
+  });
+  if (today >= start && today < end) svg += '<line x1="' + X(today).toFixed(1) + '" x2="' + X(today).toFixed(1) + '" y1="1" y2="' + (H - 12) + '" class="plan-today"/>';
+  svg += '</svg>';
+  const key = '<div class="tr-key"><span><i class="plan-k now"></i>Now</span><span><i class="plan-k done"></i>Done</span><span><i class="plan-k next"></i>Agreed</span><span><i class="plan-k proposed"></i>Proposed</span><span><i class="plan-k settle"></i>Settling</span><span><i class="plan-k today"></i>Today</span></div>';
+  const list = steps.map((st) => {
+    const state = stepState(st, today);
+    const w = stepWindow(st, today);
+    const prog = state === 'now' ? ' · day ' + dayNum(st.from, today) + (st.to ? ' of ' + dayNum(st.from, st.to) : '') : '';
+    const settling = state === 'now' && w && w.settleEnd && today <= w.settleEnd ? '<div class="ps-note">Settling until ' + esc(longDate(w.settleEnd)) + ': the last 7 days are the ones compared.</div>' : '';
+    return '<div class="plan-step ' + state + '"><div class="ps-top"><b>' + esc(st.label) + '</b><span class="ps-chip ' + state + '">' + esc(st.status || state) + '</span></div>' +
+      '<div class="ps-dates">' + esc(longDate(st.from)) + (st.to ? (st.to !== st.from ? ' – ' + esc(longDate(st.to)) : '') : ' onwards') + (st.length ? ' · ' + esc(st.length) : '') + prog + '</div>' +
+      (st.change ? '<div class="ps-change">' + esc(st.change) + '</div>' : '') + (st.watch ? '<div class="ps-watch">Watch: ' + esc(st.watch) + '</div>' : '') + settling + '</div>';
+  }).join('');
+  return svg + key + (cfg.plan.note ? '<p class="small">' + esc(cfg.plan.note) + '</p>' : '') + (withCompare ? patBtn('steps', 'Compare steps') : '') + '<div class="plan-list">' + list + '</div>' +
+    '<p class="small">From the health tracker’s Meds tab (PLAN). Proposed steps aren’t agreed yet.</p>';
+}
+/* Compare steps: each step's judged days (last 7 of a long step) against the step before and the baseline. */
+function stepsCompare(T2, today) {
+  const G = giData();
+  const steps = planSteps().filter((st) => (st.to ? dayNum(st.from, st.to) : 99) >= 3);
+  const p = { title: 'Compare steps', comps: [], note: 'Each step is judged on its last 7 days when it runs 10 days or more (the days before are settling); shorter steps use every day. Averages of the days with readings; needs 3+ days on each side. Lower is better except clarity and sleep quality.' };
+  const METRICS = [
+    ['Pain', (k) => { const x = T2.by[k]; return x ? symVal(x.d, 'p') : undefined; }, false],
+    ['Stiffness', (k) => { const x = T2.by[k]; return x ? symVal(x.d, 's') : undefined; }, false],
+    ['Fatigue', (k) => { const x = T2.by[k]; return x ? symVal(x.d, 'f') : undefined; }, false],
+    ['Mental clarity', (k) => { const x = T2.by[k]; const v = x ? symVal(x.d, 'g') : undefined; return typeof v === 'number' ? 10 - v : undefined; }, true],
+    ['Stomach on waking', (k) => (G && G.by[k] ? G.by[k][1] : undefined), false],
+    ['Sleep quality', (k) => { const x = T2.by[k]; return x ? x.d.q : undefined; }, true]
+  ];
+  const avg = (w, f) => { if (!w || !w.start) return null; const v = []; for (let k = w.start; k <= w.end; k = addDays(k, 1)) { const y = f(k); if (typeof y === 'number') v.push(y); } return v.length >= 3 ? { m: mean1(v), n: v.length } : null; };
+  const card = (a, b, title) => {
+    const wa = stepWindow(a, today), wb = stepWindow(b, today);
+    if (!wa || !wb) return;
+    const rows = METRICS.map(([name, f, up]) => {
+      const x = avg(wa, f), y = avg(wb, f);
+      if (!x || !y) return '';
+      const d = y.m - x.m, good = up ? d > 0 : d < 0;
+      const verdict = Math.abs(d) < 0.5 ? 'same' : good ? 'better' : 'worse';
+      return '<tr><td>' + name + '</td><td>' + x.m.toFixed(1) + '</td><td>' + y.m.toFixed(1) + '</td><td class="pt-v ' + verdict + '">' + (verdict === 'same' ? 'about the same' : verdict) + '</td></tr>';
+    }).join('');
+    p.html = (p.html || '') + '<div class="pt"><div class="pt-h">' + esc(title) + '</div>' + (rows ? '<table class="cmp"><tr><th></th><th>' + esc(a.label.split(' · ')[0]) + '</th><th>' + esc(b.label.split(' · ')[0]) + '</th><th></th></tr>' + rows + '</table>' : '<p class="small">Not enough days with readings yet.</p>') +
+      '<p class="small">' + esc(shortDate(wa.start || a.from) + '–' + shortDate(wa.end) + ' vs ' + shortDate(wb.start || b.from) + '–' + shortDate(wb.end)) + '</p></div>';
+  };
+  for (let i = 1; i < steps.length; i++) if (steps[i].from <= today) card(steps[i - 1], steps[i], 'Step ' + steps[i].label + ' vs the step before');
+  const base = steps.find((st) => /baseline/i.test(st.label) && st.from <= today);
+  if (base) steps.filter((st) => st !== base && st.from <= today).forEach((st) => card(base, st, st.label + ' vs the baseline'));
+  if (!p.html) p.empty = 'Nothing to compare yet: the first comparison appears once the second step has 3 days of readings (from ' + (steps[1] ? longDate(steps[1].from) : 'the next step') + ').';
+  return p;
 }
 
 /* Medication history: health days (before 04:00 counts as the previous day). */
@@ -418,10 +540,13 @@ function checkinView() {
     '<span aria-hidden="true"></span><span><h2>Check-in</h2><span class="sub">' + (S.open ? 'Leave anything blank you didn’t notice' : esc(last)) + '</span></span>' +
     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button></div>';
   if (S.open) {
-    const list = (period === 'Wake' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]));
+    const stage = S.stage || guessStage();
+    const list = (period === 'Wake' && stage === 'bed' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]));
     html += '<div id="check-body" style="display:flex;flex-direction:column;gap:14px">' +
       '<div class="grid3" role="group" aria-label="When">' + ['Wake', 'Day', 'Bed'].map((p) =>
-        '<button type="button" class="seg" data-act="period" data-v="' + p + '" aria-pressed="' + (period === p) + '">' + p + '</button>').join('') + '</div><div>' +
+        '<button type="button" class="seg" data-act="period" data-v="' + p + '" aria-pressed="' + (period === p) + '">' + p + '</button>').join('') + '</div>' +
+      (period === 'Wake' ? '<div class="grid2 stage-row" role="group" aria-label="Wake stage">' + [['bed', 'In bed'], ['up', 'Getting up']].map(([k, l]) =>
+        '<button type="button" class="seg" data-act="stage" data-v="' + k + '" aria-pressed="' + (stage === k) + '">' + l + '</button>').join('') + '</div>' : '') + '<div>' +
       list.map(([k, l, max]) => {
         const v = S.scores[k];
         const set = v !== undefined;
@@ -474,9 +599,10 @@ function logRender() {
     head('') +
     // The time pill floats at the top while you scroll; the panel opens here, or inside a sheet when one is open.
     '<div class="time-bar">' + timePill(timeLabel) + '</div>' + (S.timeOpen && !S.sheet ? timePanel(now) : '') +
-    trialView() + logInboxView() + checkinView() + quickView() +
+    trialView() + logInboxView() + checkinView() + quickView() + momentsView() +
     (waiting ? '<div class="queue-note"><span>' + waiting + ' waiting to send</span><button type="button" class="link-btn" data-act="flush">Send now</button></div>' : '') +
-    (rows.length || failed.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + rows.map((r) =>
+    (rows.length || failed.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + missingRows().map((m) =>
+      '<div class="lrow warn"><span class="t">' + esc(m.r.hm) + '</span><span>' + esc(m.miss.join(', ')) + ' not in the sheet</span><button type="button" class="link-btn" data-act="readd" data-v="' + esc(m.r.id) + '">Re-add</button></div>').join('') + rows.map((r) =>
       '<div class="lrow"><span class="t">' + esc(r.hm || '–') + '</span><span>' + esc(r.text) + '</span>' +
       (r.status === 'pending' ? '<button type="button" class="link-btn" data-act="undo" data-v="' + esc(r.id) + '">Undo</button>' :
         r.local && r.status !== 'saved' ? '<span class="st">Waiting</span>' : '<span class="st">' + esc(r.src || '') + '</span>') + '</div>').join('') +
@@ -498,6 +624,28 @@ function timePanel(now) {
   return '<div class="time-panel"><label for="time-input" class="small">Time for the next entry</label>' +
     '<input id="time-input" type="datetime-local" value="' + localInputValue(S.time || now) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '">' +
     '<div class="btns"><button type="button" class="log" data-act="time-set">Use this time</button><button type="button" class="seg" data-act="time-now">Now</button></div></div>';
+}
+/* Safety net: a medication entry this phone saved whose rows have since gone from the sheet (seen on 28 and
+   29 Oct, cause unknown). Only checked against a sheet read taken after the save. */
+function missingRows() {
+  const hk = healthKey(new Date());
+  if (!Array.isArray(cfg.todayLog) || cfg.todayHday !== hk || !cfg.at) return [];
+  return recent.filter((r) => r.kind === 'meds' && r.status === 'saved' && r.hday === hk && r.savedAt && !r.readded && cfg.at > r.savedAt + 3000 && Array.isArray(r.meds))
+    .map((r) => {
+      const rows = cfg.todayLog.filter((x) => x.id === r.id);
+      const miss = r.meds.filter((m) => !rows.some((x) => String(x.text || '').indexOf(m) === 0));
+      return miss.length ? { r, miss } : null;
+    }).filter(Boolean);
+}
+/* Moments: notable tiredness or weakness, one tap (tracking from 29 Oct 2026). Kept out of day averages. */
+const MOMENTS = ['Tired', 'Very tired', 'Weak'];
+const MOMENTS_SINCE = '2026-10-29';
+function momentsView() {
+  const today = todayEntries().filter((r) => r.kind === 'moment');
+  return '<div class="moments" role="group" aria-label="Log a moment"><span class="moments-h">Moment</span>' + MOMENTS.map((m) => {
+    const n = today.filter((r) => String(r.text || '').split(' · ')[0] === m).length;
+    return '<button type="button" class="moment-btn" data-act="moment-open" data-v="' + m + '">' + m + (n ? '<small>' + n + '</small>' : '') + '</button>';
+  }).join('') + '</div>';
 }
 /* Today's entries (this health day, 4am cut-off) from every source: the receiver's list (HealthLog v12),
    plus anything on this phone that hasn't reached it yet. Oldest first. */
@@ -570,7 +718,7 @@ function quickView() {
 }
 function sheetView() {
   if (!S.sheet || !Conn.canLog()) return '';
-  const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity' }[S.sheet];
+  const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity', moment: 'Moment', plan: 'Medication plan' }[S.sheet];
   let body = '', btn = '';
   if (S.sheet === 'meds') {
     const n = S.meds.length;
@@ -581,6 +729,13 @@ function sheetView() {
   } else if (S.sheet === 'bowel') {
     btn = '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button>';
     body = bowelBody();
+  } else if (S.sheet === 'moment') {
+    btn = '<button type="button" class="log" data-act="moment-log"' + (S.moment ? '' : ' disabled') + '>Log</button>';
+    body = '<div class="chips">' + MOMENTS.map((m) => '<button type="button" class="chip" data-act="moment-pick" data-v="' + m + '" aria-pressed="' + (S.moment === m) + '"><b>' + m + '</b></button>').join('') + '</div>' +
+      '<input type="text" id="moment-note" data-field="momentNote" value="' + esc(S.momentNote) + '" placeholder="Note (optional)" aria-label="Moment note" autocomplete="off" enterkeyhint="send">' +
+      '<p class="small">For moments that stand out. Kept separate from your day scores. Tracking since 29 Oct.</p>';
+  } else if (S.sheet === 'plan') {
+    body = planHtml(healthKey(new Date()), false);
   } else if (S.sheet === 'food') {
     btn = '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button>';
     body = '<input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="send">' +
@@ -596,7 +751,7 @@ function sheetView() {
   }
   const now = new Date();
   const label = S.time ? (dayKey(S.time) === dayKey(now) ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time) : 'Now · ' + hm(now);
-  const when = '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
+  const when = S.sheet === 'plan' ? '' : '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
   return '<div class="sheet-backdrop' + (S.sheetFresh ? ' fresh' : '') + '" data-act="sheet-close"></div>' +
     '<div class="sheet' + (S.sheetFresh ? ' fresh' : '') + '" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">' +
     '<div class="sheet-grab" aria-hidden="true"></div><div class="sheet-head"><h2 id="sheet-title">' + title + '</h2>' + btn +
@@ -616,7 +771,8 @@ function updateActButton() {
 /* iPhone only shows the keyboard if focus happens inside the tap itself, so focus a hidden input
    first, rebuild the page with the sheet, then move focus to the real field. */
 function openSheet(kind) {
-  const field = kind === 'food' ? 'food-input' : kind === 'activity' ? 'act-input' : null;
+  // Food opens the keyboard; Activity doesn't, so its type and minute buttons stay in view.
+  const field = kind === 'food' ? 'food-input' : null;
   if (field) { const proxy = $('focus-proxy'); if (proxy) proxy.focus(); }
   S.sheet = kind; S.sheetFresh = true;
   logRender();
@@ -749,7 +905,7 @@ function commit(kind, payload, label, extra) {
   const when = S.time || pickedTime() || new Date();
   const timeSet = !!(S.time || pickedTime());
   const entry = Object.assign({ kind, entryId: newId(), time: when.toISOString(), timeSet }, payload);
-  recent.unshift(Object.assign({ id: entry.entryId, day: dayKey(when), hday: healthKey(when), hm: hm(when), text: label, kind, status: 'pending' }, extra || {}));
+  recent.unshift(Object.assign({ id: entry.entryId, day: dayKey(when), hday: healthKey(when), hm: hm(when), at: when.toISOString(), text: label, kind, status: 'pending' }, extra || {}));
   S.time = null; S.timeOpen = false;
   saveLocal();
   pending[entry.entryId] = setTimeout(() => {
@@ -774,7 +930,7 @@ function logUndo(id) {
 
 function setStatus(id, status, error) {
   const r = recent.find((x) => x.id === id);
-  if (r) { r.status = status; if (error) r.error = error; }
+  if (r) { r.status = status; if (error) r.error = error; if (status === 'saved') r.savedAt = Date.now(); }
   saveLocal();
   logRenderSoft();
 }
@@ -808,7 +964,7 @@ async function logRefreshConfig() {
     const res = await api({ action: 'config' });
     if (res && res.success) {
       cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds,
-        todayLog: res.todayLog, todayHday: healthKey(new Date()), today: res.today || FALLBACK.today };
+        todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, clarity: !!res.clarity, today: res.today || FALLBACK.today };
       if ($('medications') && !$('medications').hidden) renderRecentMeds();
       if (S.sheet && document.activeElement && /INPUT/.test(document.activeElement.tagName) && document.activeElement.closest('#sheet')) {
         LS.set('config', { data: cfg, day: dayKey(new Date()) });   // don't rebuild a sheet while typing in it
@@ -827,6 +983,27 @@ async function logRefreshConfig() {
 function logAct(el) {
   const act = el.dataset.act, v = el.dataset.v;
   if (act === 'sheet') { openSheet(v); return; }
+  if (act === 'moment-open') { S.moment = v; S.momentNote = ''; openSheet('moment'); return; }
+  if (act === 'moment-pick') { S.moment = v; logRender(); return; }
+  if (act === 'moment-log') {
+    if (!MOMENTS.includes(S.moment)) return;
+    const note = S.momentNote.trim();
+    commit('moment', { moment: S.moment, note }, S.moment + (note ? ' · ' + note : ''));
+    S.moment = null; S.momentNote = ''; closeSheet();
+    return;
+  }
+  if (act === 'plan-open') { openSheet('plan'); return; }
+  if (act === 'readd') {
+    const m = missingRows().find((x) => x.r.id === v);
+    if (!m) return;
+    const doses = {};
+    m.miss.forEach((name) => { if (m.r.doses && m.r.doses[name]) doses[name] = m.r.doses[name]; });
+    const at = m.r.at ? new Date(m.r.at) : null;
+    if (at && !isNaN(at) && at.getTime() >= Date.now() - 3 * 86400000) S.time = at;
+    m.r.readded = true; saveLocal();
+    commit('meds', { meds: m.miss, doses }, m.miss.join(', ') + ' (re-added)', { meds: m.miss, doses });
+    return;
+  }
   if (act === 'sheet-close') { closeSheet(); return; }
   if (act === 'refresh') {
     if (S.refreshing) return;
@@ -857,8 +1034,13 @@ function logAct(el) {
     commit('flare', {}, 'Flare');
     return;
   }
-  if (act === 'toggle') { S.open = !S.open; if (S.open && !S.period) S.period = guessPeriod(); logRender(); }
-  else if (act === 'period') { S.period = v; if (v !== 'Wake') { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
+  if (act === 'toggle') {
+    S.open = !S.open; if (S.open && !S.period) S.period = guessPeriod(); logRender();
+    // Bring the check-in to the top of the screen so the sliders are in view.
+    if (S.open) requestAnimationFrame(() => { const c = document.querySelector('#log-main section[aria-label="Check-in"]'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  }
+  else if (act === 'period') { S.period = v; if (v !== 'Wake' || (S.stage || guessStage()) === 'up') { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
+  else if (act === 'stage') { S.stage = v; if (v === 'up') { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
   else if (act === 'bristol') { S.bristol = S.bristol === Number(v) ? null : Number(v); logRender(); }
   else if (act === 'size') { S.size = S.size === v ? null : v; logRender(); }
   else if (act === 'urgent') { S.urgent = !S.urgent; logRender(); }
@@ -917,13 +1099,18 @@ function logAct(el) {
   }
   else if (act === 'checkin') {
     const period = S.period || guessPeriod();
+    const stage = period === 'Wake' ? (S.stage || guessStage()) : '';
     const times = period === 'Wake' ? Object.fromEntries(Object.entries(S.sleepT).filter(([, v]) => /^\d{2}:\d{2}$/.test(v))) : {};
     const n = Object.keys(S.scores).length, t = Object.keys(times).length;
     if (!n && !t) return;
     const tl = [times.bed ? 'slept ' + times.bed : '', times.wake ? 'woke ' + times.wake : '', times.up ? 'up ' + times.up : ''].filter(Boolean).join(', ');
-    commit('checkin', { period, scores: Object.assign({}, S.scores), note: S.checkNote.trim(), sleep: times },
-      'Check-in (' + period.toLowerCase() + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : ''), { wake: period === 'Wake' });
-    S.scores = {}; S.checkNote = ''; S.open = false; S.period = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
+    const word = stage === 'up' ? 'getting up' : stage === 'bed' ? 'in bed' : period.toLowerCase();
+    // Receivers before HealthLog v13 only know "fog" (10 = heavy fog), so send that too until it's updated.
+    const sc = Object.assign({}, S.scores);
+    if (typeof sc.clarity === 'number') sc.fog = 10 - sc.clarity;
+    commit('checkin', { period, stage, scores: sc, note: S.checkNote.trim(), sleep: times },
+      'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : ''), { wake: stage === 'bed', up: stage === 'up' });
+    S.scores = {}; S.checkNote = ''; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
   }
   else if (act === 'trial') {
     const t = cfg.trial;
@@ -1177,7 +1364,20 @@ function renderDayCalendar(entries, error, suggestions) {
   });
 }
 
-async function completeTodoist(id, check, row, after) {
+/* Ticking a task waits a few seconds with an Undo before it's sent to Todoist. */
+const pendingDone = {};
+const isCompleting = (id) => T.completing.has(id) || !!pendingDone[id];
+function completeTodoist(id, check, row, after) {
+  if (isCompleting(id)) return;
+  row = row || (check.closest && check.closest('.ahead-row'));
+  if (row) row.classList.add('done');
+  pendingDone[id] = {
+    t: setTimeout(() => { delete pendingDone[id]; completeTodoistNow(id, check, row, after); }, UNDO_MS),
+    undo: () => { clearTimeout(pendingDone[id].t); delete pendingDone[id]; check.checked = false; check.disabled = false; if (row) row.classList.remove('done'); document.querySelectorAll('input[type=checkbox][data-task="' + id + '"]').forEach((c) => { c.checked = false; }); toast('Not completed'); }
+  };
+  toast('Completed', 'task:' + id);
+}
+async function completeTodoistNow(id, check, row, after) {
   if (T.completing.has(id)) return;
   T.completing.add(id);
   check.disabled = true;
@@ -1213,17 +1413,19 @@ function taskRow(task) {
   check.id = 'task-' + task.id;
   check.setAttribute('aria-label', 'Complete ' + task.name);
   check.disabled = T.completing.has(task.id);
-  check.checked = T.completing.has(task.id);
-  const label = document.createElement('label');
-  label.htmlFor = check.id;
+  check.checked = isCompleting(task.id);
+  check.dataset.task = task.id;
+  // Only the checkbox completes a task: the text can be selected and copied, and links open.
+  const label = document.createElement('div');
+  label.className = 'task-text';
   const name = document.createElement('div');
-  name.textContent = task.name;
+  name.appendChild(linkified(task.name));
   if (task.fromLabel) { const tag = document.createElement('span'); tag.className = 'carry-tag'; tag.textContent = 'from ' + task.fromLabel.replace(/ \d+ \w+$/, ''); tag.title = 'Not done on ' + task.fromLabel; name.appendChild(tag); }
   label.appendChild(name);
   if (task.description) {
     const desc = document.createElement('div');
     desc.className = 'sub';
-    desc.textContent = task.description.slice(0, 120);
+    desc.appendChild(linkified(task.description.slice(0, 300)));
     label.appendChild(desc);
   }
   const duration = document.createElement('span');
@@ -1470,7 +1672,7 @@ function loadOptionalWeek() {
       if (label !== last) { const h4 = document.createElement('h4'); h4.textContent = label; panel.appendChild(h4); last = label; }
       const row = document.createElement('div'); row.className = 'ahead-row ahead-task ahead-no-time';
       const check = document.createElement('input'); check.type = 'checkbox'; check.setAttribute('aria-label', 'Complete ' + t.title);
-      check.disabled = T.completing.has(t.id); check.checked = T.completing.has(t.id);
+      check.disabled = T.completing.has(t.id); check.checked = isCompleting(t.id); check.dataset.task = t.id;
       check.onchange = () => { if (check.checked) completeTodoist(t.id, check, null, loadOptionalWeek); };
       const content = document.createElement('div');
       const a = document.createElement('a'); a.href = t.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = t.title; content.appendChild(a);
@@ -1513,7 +1715,7 @@ function loadNextFewDays() {
             check.type = 'checkbox';
             check.setAttribute('aria-label', 'Complete ' + item.title);
             const id = item.id || decodeURIComponent(String(item.url || '').split('/').pop());
-            check.disabled = T.completing.has(id); check.checked = T.completing.has(id);
+            check.disabled = T.completing.has(id); check.checked = isCompleting(id); check.dataset.task = id;
             check.onchange = () => { if (check.checked) completeTodoist(id, check, null, loadNextFewDays); };
             row.appendChild(check);
           }
@@ -1781,7 +1983,7 @@ const TREND_SYMS = [
   { k: 'p', name: 'Pain', color: '#2a78d6', dash: '' },
   { k: 's', name: 'Stiffness', color: '#1baf7a', dash: '6 3' },
   { k: 'f', name: 'Fatigue', color: '#d99200', dash: '2 3' },
-  { k: 'g', name: 'Brain fog', color: '#7a68e0', dash: '8 3 2 3' },
+  { k: 'g', name: 'Mental clarity', color: '#7a68e0', dash: '8 3 2 3', inv: true },  // stored in fog direction; shown as 10 − value
   { k: 'h', name: 'Headache', color: '#e0679a', dash: '1 4' }
 ];
 /* Tuning: how far from usual counts as better / worse / much worse, and the evidence needed.
@@ -1922,9 +2124,11 @@ function showTip(el) {
   const left = Math.min(Math.max(8, r.left + r.width / 2 - tw / 2), window.innerWidth - tw - 8);
   const top = r.top - th - 8 < 8 ? r.bottom + 8 : r.top - th - 8;
   t.style.left = left + 'px'; t.style.top = top + 'px';
+  if (TR.tipEl && TR.tipEl !== el && TR.tipEl.classList) TR.tipEl.classList.remove('on');
+  if (el.classList) el.classList.add('on');
   TR.tipEl = el;
 }
-function hideTip() { const t = $('tr-tip'); if (t) t.hidden = true; TR.tipEl = null; }
+function hideTip() { const t = $('tr-tip'); if (t) t.hidden = true; if (TR.tipEl && TR.tipEl.classList) TR.tipEl.classList.remove('on'); TR.tipEl = null; }
 window.addEventListener('scroll', hideTip, { passive: true });
 document.addEventListener('click', (e) => { if (TR.tipEl && !(e.target.closest && e.target.closest('[data-tip]'))) hideTip(); });
 
@@ -1976,10 +2180,10 @@ function trendsRender() {
   const sel = TR.sel && TR.sel <= today ? TR.sel : null;
   if (sel) {
     const x = by[sel];
-    const vals = x ? TREND_SYMS.filter((sm) => typeof symVal(x.d, sm.k) === 'number').map((sm) => sm.name.toLowerCase() + ' ' + symVal(x.d, sm.k)) : [];
+    const vals = x ? TREND_SYMS.filter((sm) => typeof symVal(x.d, sm.k) === 'number').map((sm) => sm.name.toLowerCase() + ' ' + (sm.inv ? Math.round((10 - symVal(x.d, sm.k)) * 10) / 10 : symVal(x.d, sm.k))) : [];
     html += '<p class="tr-detail"><b>' + esc(longDate(sel)) + '</b> · ' + (x && x.load !== null
       ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') + (x.flag ? ' · flare noted' : '') + ' · ' + vals.join(', ') +
-        (Object.keys(x.dev || {}).filter((kk) => x.dev[kk] >= SYM_WORSE).length ? ' · above usual: ' + Object.keys(x.dev).filter((kk) => x.dev[kk] >= SYM_WORSE).map((kk) => TREND_SYMS.find((t) => t.k === kk).name.toLowerCase() + ' +' + x.dev[kk].toFixed(1)).join(', ') : '') +
+        (Object.keys(x.dev || {}).filter((kk) => x.dev[kk] >= SYM_WORSE).length ? ' · above usual: ' + Object.keys(x.dev).filter((kk) => x.dev[kk] >= SYM_WORSE).map((kk) => { const t = TREND_SYMS.find((y) => y.k === kk); return t.name.toLowerCase() + (t.inv ? ' −' : ' +') + x.dev[kk].toFixed(1); }).join(', ') : '') +
         (x.readings ? ' · ' + x.readings + (x.readings === 1 ? ' reading' : ' readings') : '') + (T2.means ? '' : ' · daily highs')
       : (x && x.flag ? 'flare noted · ' : '') + (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>' + dayStrip(sel);
   } else html += '<p class="tr-detail muted">Tap a day for its scores and a 24-hour view.</p>';
@@ -1989,12 +2193,12 @@ function trendsRender() {
   html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
   html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
-  html += stomachView(T2) + medsView(today) + sleepView(T2);
+  html += momentsHealth(T2, today) + stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + planHtml(today, true) : '') + sleepView(T2);
   html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. A ring marks a day much worse than usual; runs of those (with the worse days around them) show as flares. Days run 04:00 to 04:00.</p>' +
     fileLinks([['Health tracker', LINKS.healthSheet]]);
   if (TR.pop) {
     const G = giData();
-    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : null;
+    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : null;
     html += patternsPopup(pop);
     TR.popFresh = false;
   }
@@ -2038,7 +2242,7 @@ function trendsChart(T2) {
   const dots = (get, cls) => list.map((x, i) => { const v = get(x); return typeof v === 'number' && (i === 0 || typeof get(list[i - 1]) !== 'number') && (i === n - 1 || typeof get(list[i + 1]) !== 'number') ? '<circle cx="' + X(i) + '" cy="' + Y(v) + '" r="2" class="' + cls + '"/>' : ''; }).join('');
   TREND_SYMS.forEach((s) => {
     if (!TR.on.includes(s.k)) return;
-    const get = (x) => symVal(x.d, s.k);
+    const get = (x) => { const v = symVal(x.d, s.k); return s.inv && typeof v === 'number' ? 10 - v : v; };
     svg += '<path d="' + path(get) + '" fill="none" stroke="' + s.color + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"' + (s.dash ? ' stroke-dasharray="' + s.dash + '"' : '') + '/>' +
       dots(get, '').replace(/class=""/g, 'fill="' + s.color + '"');
   });
@@ -2101,6 +2305,7 @@ function patternsHtml(p) {
     h += '<div class="pt"><div class="pt-h">' + esc(c.title) + '</div><div class="pt-row">' + cell(c.left) + cell(c.right) + '</div>' +
       (c.verdict ? '<div class="pt-v ' + (c.tone || '') + '">' + esc(c.verdict) + '</div>' : '') + '</div>';
   });
+  if (p.html) h += p.html;
   if (p.empty) h += '<p class="small">' + esc(p.empty) + '</p>';
   if (p.note) h += '<p class="pt-note">' + esc(p.note) + '</p>';
   return h;
@@ -2145,12 +2350,36 @@ function dayStrip(k) {
   const ticks = (items, cls, y) => (items || []).forEach((x) => { const t = mins(x.time); if (t !== null) svg += '<line x1="' + X(t).toFixed(1) + '" x2="' + X(t).toFixed(1) + '" y1="' + y + '" y2="' + (y + 9) + '" class="' + cls + '"><title>' + esc(x.time + ' · ' + x.text) + '</title></line>'; });
   ticks(det.meals, 'tr-tick food', 76);
   ticks(det.bowel, 'tr-tick bowel', 76);
+  (det.moments || []).forEach((x) => { const t = mins(x.time); if (t !== null) svg += '<path d="M' + X(t).toFixed(1) + ' ' + (top - 8) + 'l4 6h-8z" class="tr-moment ' + (x.text === 'Weak' ? 'weak' : x.text === 'Very tired' ? 'vtired' : 'tired') + '"><title>' + esc(x.time + ' · ' + x.text + (x.note ? ' · ' + x.note : '')) + '</title></path>'; });
   svg += '</svg>';
   const has = (det.activity || []).length || (det.checks || []).length || (det.meals || []).length || (det.bowel || []).length;
-  return svg + '<div class="tr-key"><span><i class="tr-kbar"></i>Activity</span><span><i class="tr-kdot"></i>Check-in (chosen symptoms)</span><span><i class="tr-ktick food"></i>Food</span><span><i class="tr-ktick bowel"></i>Bowel</span></div>' +
+  return svg + '<div class="tr-key"><span><i class="tr-kbar"></i>Activity</span><span><i class="tr-kdot"></i>Check-in (chosen symptoms)</span><span><i class="tr-ktick food"></i>Food</span><span><i class="tr-ktick bowel"></i>Bowel</span>' + ((det.moments || []).length ? '<span><i class="tr-kmo"></i>Moment</span>' : '') + '</div>' +
     (has ? '' : '<p class="small">Nothing with a clock time logged that day.</p>') + ((det.activity === undefined) ? '<p class="small">Activity and check-in times need the HealthLog v10 update.</p>' : '');
 }
 
+/* Moments (tired / very tired / weak), from 29 Oct: dots per day for the last six weeks. */
+function momentsHealth(T2, today) {
+  const n = 42, first0 = addDays(today, -(n - 1));
+  const any = T2.list.some((x) => x.d.mt || x.d.mv || x.d.mw);
+  let html = '<h2 class="tr-h">Moments</h2>';
+  if (!any) return html + '<p class="small tr-hint">Tired, very tired and weak moments from the Log tab show here. Tracking since ' + esc(longDate(MOMENTS_SINCE)) + '.</p>';
+  const W = 360, L = 58, R = 4, rowH = 13, gap = 4, top = 4, H = top + 2 * (rowH + gap) + 12;
+  const bw = (W - L - R) / n;
+  let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Tired and weak moments, last six weeks">';
+  ['Tired', 'Weak'].forEach((name, r) => { svg += '<text x="' + (L - 6) + '" y="' + (top + r * (rowH + gap) + rowH - 3) + '" class="tr-ax" text-anchor="end">' + name + '</text>'; });
+  for (let i = 0; i < n; i++) {
+    const k = addDays(first0, i), x = T2.by[k];
+    const cx = L + i * bw + bw / 2;
+    if (k < MOMENTS_SINCE) continue;
+    const d = x ? x.d : {};
+    const tired = (d.mt || 0) + (d.mv || 0), weak = d.mw || 0;
+    if (tired) svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + (top + rowH / 2) + '" r="' + Math.min(6, 2.5 + tired) + '" class="tr-mo ' + (d.mv ? 'vtired' : 'tired') + '"/>';
+    if (weak) svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + (top + rowH + gap + rowH / 2) + '" r="' + Math.min(6, 2.5 + weak) + '" class="tr-mo weak"/>';
+    if (tired || weak) svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (top + 2 * (rowH + gap)) + '" class="tr-hit" data-tip="' + esc(longDate(k) + ' · ' + [d.mt ? d.mt + ' tired' : '', d.mv ? d.mv + ' very tired' : '', weak ? weak + ' weak' : ''].filter(Boolean).join(', ')) + '"/>';
+  }
+  svg += '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(first0)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(today)) + '</text></svg>';
+  return html + svg + '<p class="small tr-hint">Bigger dot = more that day; darker = very tired. Tracking since ' + esc(longDate(MOMENTS_SINCE)) + '; not part of day scores.</p>';
+}
 /* ---------- Stomach: average stomach pain each day, omeprazole days, tap for food; then stomach through the day ---------- */
 const stomachLevel = (v) => (v < 1 ? 0 : v < 2.5 ? 1 : v < 4 ? 2 : v < 6 ? 3 : 4);
 /* Bowel marker in the corner: loose (Bristol 6–7) wins over hard (1–2) if both happened. */
@@ -2190,7 +2419,6 @@ function dayPartsView(G, today) {
     for (let r = 0; r < 4; r++) {
       let v = d[r + 1], cls = '', label = '';
       if (giNum(v)) { cls = 's' + stomachLevel(v); label = GI_PARTS[r].toLowerCase() + ' stomach pain ' + v; }
-      else if (r === 0 && d[5] === 1) { cls = 'yes'; label = 'woke with stomach pain (no score)'; }
       else if (r === 0 && d[5] === 0) { cls = 's0'; label = 'no stomach pain on waking'; }
       if (!cls) continue;
       svg += '<rect x="' + (L + i * bw + 0.5).toFixed(1) + '" y="' + (top + r * (rowH + gap)) + '" width="' + Math.max(1.5, bw - 1).toFixed(1) + '" height="' + rowH + '" rx="1.5" class="tr-part ' + cls + '"/>';
@@ -2201,7 +2429,6 @@ function dayPartsView(G, today) {
     const k = addDays(first, i), d = G.by[k];
     if (!d) continue;
     const bits = GI_PARTS.map((name, r) => (giNum(d[r + 1]) ? name.toLowerCase() + ' ' + d[r + 1] : '')).filter(Boolean);
-    if (!giNum(d[1]) && d[5] === 1) bits.unshift('woke with pain');
     if (!giNum(d[1]) && d[5] === 0) bits.unshift('no pain on waking');
     if (d[6] === 1) bits.push('probiotic');
     if (!bits.length) continue;
@@ -2213,7 +2440,7 @@ function dayPartsView(G, today) {
   }
   svg += '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(first)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(today)) + '</text></svg>';
   return '<div class="tr-sub">Through the day</div>' + svg +
-    '<div class="tr-key"><span><i class="tr-omeline-key"></i>Omeprazole started</span><span><i class="tr-part-key yes"></i>Woke with pain, no score</span></div>' +
+    '<div class="tr-key"><span><i class="tr-omeline-key"></i>Omeprazole started</span><span>Tap a day for its readings</span></div>' +
     patBtn('stomach', 'Stomach patterns');
 }
 /* Stomach patterns: mornings before vs since omeprazole, and probiotic (before vs since, and days taken vs not). */
