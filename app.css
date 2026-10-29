@@ -586,3 +586,5 @@ table.cmp td.pt-v{display:table-cell;font-size:12px}
 html,body{overscroll-behavior-y:none}
 #tabbar{-webkit-transform:translate3d(0,0,0);transform:translate3d(0,0,0);will-change:transform}
 .reward-undo{min-height:32px;padding:0 14px;font-size:13px;font-weight:500;margin-top:10px;opacity:.8}
+.moment-btn[aria-pressed=true]{border-color:var(--ink);background:var(--ink);color:var(--on-ink)}
+.moment-btn[aria-pressed=true] small{background:var(--on-ink);color:var(--ink)}

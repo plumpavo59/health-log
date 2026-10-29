@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v25 · 29 Oct';
+const APP_VERSION = 'v26 · 29 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -661,9 +661,10 @@ const MOMENTS = ['Tired', 'Very tired', 'Weak'];
 const MOMENTS_SINCE = '2026-10-29';
 function momentsView() {
   const today = todayEntries().filter((r) => r.kind === 'moment');
-  return '<div class="moments" role="group" aria-label="Log a moment"><span class="moments-h">Moment</span>' + MOMENTS.map((m) => {
+  // Tap one to include it with this check-in (the Note below goes with it); tap again to unselect.
+  return '<div class="moments" role="group" aria-label="Moment">' + MOMENTS.map((m) => {
     const n = today.filter((r) => String(r.text || '').split(' · ')[0] === m).length;
-    return '<button type="button" class="moment-btn" data-act="moment-open" data-v="' + m + '">' + m + (n ? '<small>' + n + '</small>' : '') + '</button>';
+    return '<button type="button" class="moment-btn" data-act="moment-pick-ci" data-v="' + m + '" aria-pressed="' + (S.moment === m) + '">' + m + (n ? '<small>' + n + '</small>' : '') + '</button>';
   }).join('') + '</div>';
 }
 /* Today's entries (this health day, 4am cut-off) from every source: the receiver's list (HealthLog v12),
@@ -905,7 +906,7 @@ function localInputValue(d) { return dayKey(d) + 'T' + hm(d); }
 function updateCheckButton() {
   const b = $('check-save');
   if (!b) return;
-  const n = Object.keys(S.scores).length + ((S.period || guessPeriod()) === 'Wake' ? Object.values(S.sleepT).filter(Boolean).length : 0);
+  const n = Object.keys(S.scores).length + ((S.period || guessPeriod()) === 'Wake' ? Object.values(S.sleepT).filter(Boolean).length : 0) + (S.moment ? 1 : 0);
   b.disabled = !n;
   b.textContent = n ? 'Save check-in · ' + n + (n === 1 ? ' entry' : ' entries') : 'Save check-in';
 }
@@ -1004,6 +1005,7 @@ function logAct(el) {
   if (act === 'sheet') { openSheet(v); return; }
   if (act === 'moment-open') { S.moment = v; S.momentNote = ''; openSheet('moment'); return; }
   if (act === 'moment-pick') { S.moment = v; logRender(); return; }
+  if (act === 'moment-pick-ci') { S.moment = S.moment === v ? null : v; logRender(); return; }
   if (act === 'moment-log') {
     if (!MOMENTS.includes(S.moment)) return;
     const note = S.momentNote.trim();
@@ -1121,7 +1123,15 @@ function logAct(el) {
     const stage = period === 'Wake' ? (S.stage || guessStage()) : '';
     const times = period === 'Wake' ? Object.fromEntries(Object.entries(S.sleepT).filter(([, v]) => /^\d{2}:\d{2}$/.test(v))) : {};
     const n = Object.keys(S.scores).length, t = Object.keys(times).length;
-    if (!n && !t) return;
+    const mo = MOMENTS.includes(S.moment) ? S.moment : null;
+    if (!n && !t && !mo) return;
+    const note = S.checkNote.trim(), at = S.time;
+    if (mo) {
+      // A moment is its own entry (kept out of day scores); the note goes with it.
+      commit('moment', { moment: mo, note }, mo + (note ? ' · ' + note : ''));
+      S.time = at;
+    }
+    if (!n && !t) { S.moment = null; S.checkNote = ''; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender(); return; }
     const tl = [times.bed ? 'slept ' + times.bed : '', times.wake ? 'woke ' + times.wake : '', times.up ? 'up ' + times.up : ''].filter(Boolean).join(', ');
     const word = stage === 'up' ? 'getting up' : stage === 'bed' ? 'in bed' : period.toLowerCase();
     // Receivers before HealthLog v13 only know "fog" (10 = heavy fog), so send that too until it's updated.
@@ -1129,7 +1139,7 @@ function logAct(el) {
     if (typeof sc.clarity === 'number') sc.fog = 10 - sc.clarity;
     commit('checkin', { period, stage, scores: sc, note: S.checkNote.trim(), sleep: times },
       'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : ''), { wake: stage === 'bed', up: stage === 'up' });
-    S.scores = {}; S.checkNote = ''; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
+    S.scores = {}; S.checkNote = ''; S.moment = null; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
   }
   else if (act === 'trial') {
     const t = cfg.trial;
