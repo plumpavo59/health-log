@@ -1,6 +1,6 @@
 /* Life HQ service worker: opens instantly from cache, updates in the background.
    Only this site's own files are cached. Requests to Google are never touched. */
-const CACHE = 'life-hq-v23';
+const CACHE = 'life-hq-v24';
 const SHELL = ['./', './index.html', './app.js', './app.css', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png',
   './today/', './today/index.html', './today/manifest.webmanifest', './today/icon-192.png', './today/icon-512.png', './today/apple-touch-icon.png'];
 
