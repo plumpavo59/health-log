@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v26 · 29 Oct';
+const APP_VERSION = 'v27 · 31 Oct';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -325,6 +325,7 @@ function guessPeriod() {
 const guessStage = () => (wokeToday() ? 'up' : 'bed');
 
 const S = {
+  suppOn: false, supps: [],
   open: false, period: null, stage: null, scores: {}, checkNote: '', calMed: null, moment: null, momentNote: '',
   bristol: null, size: null, urgent: false, bowelNote: '',
   meds: [], doses: {}, food: '', time: null, timeOpen: false,
@@ -636,13 +637,22 @@ function logRender() {
   }
 }
 const CLOCK_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+/* One tap opens the phone's date/time picker straight away (an invisible input sits over the pill). */
 function timePill(label) {
-  return '<button type="button" class="pill' + (S.time ? ' set' : '') + '" data-act="time" aria-expanded="' + S.timeOpen + '" aria-label="Time for the next entry: ' + esc(label) + '">' + CLOCK_SVG + esc(label) + '</button>';
+  const now = new Date();
+  return '<span class="time-pick-wrap"><label class="pill time-pick' + (S.time ? ' set' : '') + '">' + CLOCK_SVG + esc(label) +
+    '<input type="datetime-local" class="time-overlay" aria-label="Time for the next entry: ' + esc(label) + '" value="' + localInputValue(S.time || now) + '" min="' + localInputValue(new Date(now.getTime() - 3 * 86400000)) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '"></label>' +
+    (S.time ? '<button type="button" class="time-reset" data-act="time-now" aria-label="Back to now">Now</button>' : '') + '</span>';
 }
 function timePanel(now) {
   return '<div class="time-panel"><label for="time-input" class="small">Time for the next entry</label>' +
     '<input id="time-input" type="datetime-local" value="' + localInputValue(S.time || now) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '">' +
     '<div class="btns"><button type="button" class="log" data-act="time-set">Use this time</button><button type="button" class="seg" data-act="time-now">Now</button></div></div>';
+}
+function todayListHtml(kind) {
+  const rows = todayEntries().filter((r) => r.kind === kind).reverse();
+  if (!rows.length) return '';
+  return '<div class="sheet-today"><div class="opt-h">Today</div>' + rows.map((r) => '<div class="lrow"><span class="t">' + esc(r.hm || '–') + '</span><span>' + esc(r.text) + '</span></div>').join('') + '</div>';
 }
 /* Safety net: a medication entry this phone saved whose rows have since gone from the sheet (seen on 28 and
    29 Oct, cause unknown). Only checked against a sheet read taken after the save. */
@@ -720,9 +730,11 @@ function quickCount(kind) {
   if (kind === 'meds') {
     // Routine medicines ("Per day" above 0 in Log settings): how many of today's doses are logged, and how many are left.
     const routine = (cfg.meds || []).filter((m) => Number(m.perDay) > 0 && !maxTabs(m));
-    const total = routine.reduce((t, m) => t + Number(m.perDay), 0);
+    // All supplements together count as one daily item.
+    const sup = suppList().length ? 1 : 0;
+    const total = routine.reduce((t, m) => t + Number(m.perDay), 0) + sup;
     if (!total) return '';
-    const done = routine.reduce((t, m) => t + Math.min(medTakenToday(m), Number(m.perDay)), 0);
+    const done = routine.reduce((t, m) => t + Math.min(medTakenToday(m), Number(m.perDay)), 0) + (sup && suppDoneToday() ? 1 : 0);
     return done >= total ? 'All ' + total + ' ✓' : done + '/' + total + ' · ' + (total - done) + ' left';
   }
   const rows = todayEntries().filter((r) => r.kind === kind);
@@ -741,11 +753,13 @@ function sheetView() {
   const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity', moment: 'Moment', plan: 'Medication plan' }[S.sheet];
   let body = '', btn = '';
   if (S.sheet === 'meds') {
-    const n = S.meds.length;
+    const sup = suppList();
+    const n = S.meds.length + (S.suppOn && S.supps.length ? 1 : 0);
     btn = '<button type="button" class="log" data-act="meds"' + (n ? '' : ' disabled') + '>' + (n ? 'Log ' + n : 'Log') + '</button>';
     body = '<div class="chips">' + (cfg.meds || []).map((m) =>
       '<button type="button" class="chip med" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><small class="dose-top">' + esc(chipDoseTop(m)) + '</small><span class="med-name"><b>' + esc(m.name) + '</b>' + takenMark(m) + '</span></button>').join('') +
-      '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' + doseRows() + historyView();
+      (sup.length ? '<button type="button" class="chip med" data-act="supp-toggle" aria-pressed="' + S.suppOn + '"><small class="dose-top">' + sup.length + ' to choose</small><span class="med-name"><b>Supplements</b>' + (suppDoneToday() ? '<span class="taken" aria-label="logged today">✓</span>' : '') + '</span></button>' : '') +
+      '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' + doseRows() + suppRow() + historyView();
   } else if (S.sheet === 'bowel') {
     btn = '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button>';
     body = bowelBody();
@@ -771,6 +785,7 @@ function sheetView() {
   }
   const now = new Date();
   const label = S.time ? (dayKey(S.time) === dayKey(now) ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time) : 'Now · ' + hm(now);
+  if (S.sheet === 'food' || S.sheet === 'activity' || S.sheet === 'bowel') body += todayListHtml(S.sheet);
   const when = S.sheet === 'plan' ? '' : '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
   return '<div class="sheet-backdrop' + (S.sheetFresh ? ' fresh' : '') + '" data-act="sheet-close"></div>' +
     '<div class="sheet' + (S.sheetFresh ? ' fresh' : '') + '" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">' +
@@ -849,6 +864,21 @@ function takenMark(m) {
   return '<span class="taken" aria-label="' + (n < per && !asNeeded ? n + ' of ' + per + ' logged today' : 'logged today' + (n > 1 ? ', ' + n + ' times' : '')) + '">' + text + '</span>';
 }
 
+/* Supplements (Log settings › SUPPLEMENTS): one "Supplements" chip opens a picker, preselected with the
+   Default ones; each logs as its own Medication row with the product and dose from the sheet at that moment. */
+const suppList = () => (Array.isArray(cfg.supps) ? cfg.supps : []);
+function suppDoneToday() {
+  const names = suppList().map((x) => x.name);
+  if (!names.length) return false;
+  const hk = healthKey(new Date());
+  return todayEntries().some((r) => (r.kind === 'meds' || r.kind === 'supps') && names.some((n) => String(r.text || '').indexOf(n) === 0 || String(r.text || '').indexOf('Supplements') === 0)) ||
+    recent.some((r) => r.kind === 'supps' && r.hday === hk && r.status !== 'failed');
+}
+function suppRow() {
+  if (!S.suppOn) return '';
+  return '<div class="dose-row supp-row" role="group" aria-label="Supplements"><span>Supplements</span>' + suppList().map((x) =>
+    '<button type="button" class="seg" data-act="supp" data-v="' + esc(x.name) + '" aria-pressed="' + S.supps.includes(x.name) + '"' + (x.detail ? ' title="' + esc(x.detail) + '"' : '') + '>' + esc(x.name) + '</button>').join('') + '</div>';
+}
 /* The strength sits above the name and never changes on selection, so the chips don't shift around. */
 function chipDoseTop(m) { return isDosed(m) ? doseShort(medOptions(m)) + (maxTabs(m) ? ' · 1–' + maxTabs(m) : '') : (m.strength || ''); }
 
@@ -984,7 +1014,7 @@ async function logRefreshConfig() {
     const res = await api({ action: 'config' });
     if (res && res.success) {
       cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds,
-        todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, clarity: !!res.clarity, today: res.today || FALLBACK.today };
+        supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, clarity: !!res.clarity, today: res.today || FALLBACK.today };
       if ($('medications') && !$('medications').hidden) renderRecentMeds();
       if (S.sheet && document.activeElement && /INPUT/.test(document.activeElement.tagName) && document.activeElement.closest('#sheet')) {
         LS.set('config', { data: cfg, day: dayKey(new Date()) });   // don't rebuild a sheet while typing in it
@@ -1074,6 +1104,12 @@ function logAct(el) {
     }
     logRender();
   }
+  else if (act === 'supp-toggle') {
+    S.suppOn = !S.suppOn;
+    S.supps = S.suppOn ? suppList().filter((x) => x.def).map((x) => x.name) : [];
+    logRender();
+  }
+  else if (act === 'supp') { S.supps = S.supps.includes(v) ? S.supps.filter((x) => x !== v) : suppList().map((x) => x.name).filter((x) => S.supps.includes(x) || x === v); logRender(); }
   else if (act === 'dose') {
     const d = S.doses[v] || {};
     if (el.dataset.k === 'n') d.n = Number(el.dataset.dose); else d.s = el.dataset.dose;
@@ -1101,7 +1137,15 @@ function logAct(el) {
     S.bristol = null; S.size = null; S.urgent = false; S.bowelNote = ''; closeSheet();
   }
   else if (act === 'meds') {
-    if (!S.meds.length) return;
+    const sup = S.suppOn ? S.supps.slice() : [];
+    if (!S.meds.length && !sup.length) return;
+    const at = S.time;
+    if (sup.length) {
+      commit('supps', { supps: sup }, 'Supplements: ' + sup.join(', '), { supps: sup });
+      S.time = at;
+    }
+    S.suppOn = false; S.supps = [];
+    if (!S.meds.length) { closeSheet(); return; }
     const chosen = (cfg.meds || []).filter((m) => S.meds.includes(m.name));
     // Dose choices need the v5 HealthLog script (it sends "options"); older ones would record the wrong dose.
     const stale = chosen.find((m) => (isDosed(m) || /paracetamol|co-?codamol|codeine/i.test(m.name)) && !('maxTabs' in m));
@@ -1148,7 +1192,18 @@ function logAct(el) {
   }
 }
 
+document.addEventListener('click', (ev) => {
+  const t = ev.target;
+  if (t && t.classList && t.classList.contains('time-overlay') && t.showPicker) { try { t.showPicker(); } catch (e) {} }
+});
 document.addEventListener('change', (ev) => {
+  const t = ev.target;
+  if (t && t.classList && t.classList.contains('time-overlay')) {
+    const d = t.value ? new Date(t.value) : null;
+    if (d && !isNaN(d) && d.getTime() <= Date.now() + 10 * 60000 && d.getTime() >= Date.now() - 3 * 86400000) { S.time = d; S.timeOpen = false; logRender(); toast('Next entry will be logged at ' + hm(d)); }
+    else { toast('Pick a time in the last 3 days'); logRender(); }
+    return;
+  }
   if (ev.target.id !== 'time-input') return;
   const d = ev.target.value ? new Date(ev.target.value) : null;
   if (d && !isNaN(d) && d.getTime() <= Date.now() + 10 * 60000 && d.getTime() >= Date.now() - 3 * 86400000) { S.time = d; S.timeOpen = false; logRender(); toast('Next entry will be logged at ' + hm(d)); }
@@ -2033,7 +2088,7 @@ const TREND_SYMS = [
    own usual, or the average is. Roughly 1 day in 5 comes out worse with these numbers. */
 const USUAL_DAYS = 28, USUAL_MIN = 5, MIN_READINGS = 2;
 const SYM_WORSE = 1.0, SYM_MUCH = 2.0, AVG_WORSE = 0.5, AVG_MUCH = 1.25, AVG_BETTER = -0.75;
-const TR = { at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f']), days: {} };
+const TR = { gi: LS.get('trends.gi', 'pain'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f']), days: {} };
 // Brain fog and headache are off by default now; move anyone still on the old default.
 if (TR.inc.length === 5 && ['p', 's', 'f', 'g', 'h'].every((k) => TR.inc.includes(k))) { TR.inc = ['p', 's', 'f']; LS.set('trends.inc', TR.inc); }
 const incSyms = () => TREND_SYMS.filter((x) => TR.inc.includes(x.k));
@@ -2446,6 +2501,14 @@ function giData() {
 }
 const giNum = (v) => typeof v === 'number';
 const GI_PARTS = ['Morning', 'Afternoon', 'Evening', 'Night'];
+const giMode = () => (['pain', 'bloat', 'both'].includes(TR.gi) ? TR.gi : 'pain');
+/* Value for part r (0 morning … 3 night): stomach pain, bloating (HealthLog v14), or the worse of the two. */
+function giPart(d, r) {
+  const p = d[r + 1], b = d.length > 8 ? d[r + 8] : null, m = giMode();
+  if (m === 'pain') return giNum(p) ? p : null;
+  if (m === 'bloat') return giNum(b) ? b : null;
+  return giNum(p) || giNum(b) ? Math.max(giNum(p) ? p : 0, giNum(b) ? b : 0) : null;
+}
 function dayPartsView(G, today) {
   const n = 42, W = 360, L = 58, R = 4, rowH = 13, gap = 3, top = 4;
   const bw = (W - L - R) / n, H = top + 4 * (rowH + gap) + 12;
@@ -2458,8 +2521,8 @@ function dayPartsView(G, today) {
     const k = addDays(first, i), d = G.by[k];
     if (!d) continue;
     for (let r = 0; r < 4; r++) {
-      let v = d[r + 1], cls = '', label = '';
-      if (giNum(v)) { cls = 's' + stomachLevel(v); label = GI_PARTS[r].toLowerCase() + ' stomach pain ' + v; }
+      let v = giPart(d, r), cls = '', label = '';
+      if (giNum(v)) { cls = 's' + stomachLevel(v); label = GI_PARTS[r].toLowerCase() + ' ' + v; }
       else if (r === 0 && d[5] === 0) { cls = 's0'; label = 'no stomach pain on waking'; }
       if (!cls) continue;
       svg += '<rect x="' + (L + i * bw + 0.5).toFixed(1) + '" y="' + (top + r * (rowH + gap)) + '" width="' + Math.max(1.5, bw - 1).toFixed(1) + '" height="' + rowH + '" rx="1.5" class="tr-part ' + cls + '"/>';
@@ -2469,7 +2532,11 @@ function dayPartsView(G, today) {
   for (let i = 0; i < n; i++) {
     const k = addDays(first, i), d = G.by[k];
     if (!d) continue;
-    const bits = GI_PARTS.map((name, r) => (giNum(d[r + 1]) ? name.toLowerCase() + ' ' + d[r + 1] : '')).filter(Boolean);
+    const bits = GI_PARTS.map((name, r) => {
+      const p = d[r + 1], b = d.length > 8 ? d[r + 8] : null;
+      const parts = [giNum(p) ? 'pain ' + p : '', giNum(b) ? 'bloating ' + b : ''].filter(Boolean);
+      return parts.length ? name.toLowerCase() + ' ' + parts.join(', ') : '';
+    }).filter(Boolean);
     if (!giNum(d[1]) && d[5] === 0) bits.unshift('no pain on waking');
     if (d[6] === 1) bits.push('probiotic');
     if (!bits.length) continue;
@@ -2480,7 +2547,8 @@ function dayPartsView(G, today) {
     svg += '<line x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="1" y2="' + (H - 11) + '" class="tr-omeline"/>';
   }
   svg += '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(first)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(today)) + '</text></svg>';
-  return '<div class="tr-sub">Through the day</div>' + svg +
+  return '<div class="tr-sub">Through the day</div><div class="tr-chips tr-gichips">' + [['pain', 'Pain'], ['bloat', 'Bloating'], ['both', 'Both']].map(([k, l]) =>
+    '<button type="button" class="tr-chip" data-tr="gi" data-v="' + k + '" aria-pressed="' + (giMode() === k) + '">' + l + '</button>').join('') + '</div>' + svg +
     '<div class="tr-key"><span><i class="tr-omeline-key"></i>Omeprazole started</span><span>Tap a day for its readings</span></div>' +
     patBtn('stomach', 'Stomach patterns');
 }
@@ -2735,6 +2803,7 @@ function trendsClick(ev) {
   else if (act === 'sday') { TR.ssel = TR.ssel === v ? null : v; trendsRender(); if (TR.ssel) loadDayDetail(TR.ssel); }
   else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
   else if (act === 'med') { TR.med = v; LS.set('trends.med', v); trendsRender(); }
+  else if (act === 'gi') { TR.gi = v; LS.set('trends.gi', v); trendsRender(); }
   else if (act === 'pat-close') closePatterns();
   else if (act === 'pair') openSettings('pair');
 }
