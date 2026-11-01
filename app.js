@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v27 · 31 Oct';
+const APP_VERSION = 'v28 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -2088,7 +2088,7 @@ const TREND_SYMS = [
    own usual, or the average is. Roughly 1 day in 5 comes out worse with these numbers. */
 const USUAL_DAYS = 28, USUAL_MIN = 5, MIN_READINGS = 2;
 const SYM_WORSE = 1.0, SYM_MUCH = 2.0, AVG_WORSE = 0.5, AVG_MUCH = 1.25, AVG_BETTER = -0.75;
-const TR = { gi: LS.get('trends.gi', 'pain'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f']), days: {} };
+const TR = { gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f']), days: {} };
 // Brain fog and headache are off by default now; move anyone still on the old default.
 if (TR.inc.length === 5 && ['p', 's', 'f', 'g', 'h'].every((k) => TR.inc.includes(k))) { TR.inc = ['p', 's', 'f']; LS.set('trends.inc', TR.inc); }
 const incSyms = () => TREND_SYMS.filter((x) => TR.inc.includes(x.k));
@@ -2501,7 +2501,7 @@ function giData() {
 }
 const giNum = (v) => typeof v === 'number';
 const GI_PARTS = ['Morning', 'Afternoon', 'Evening', 'Night'];
-const giMode = () => (['pain', 'bloat', 'both'].includes(TR.gi) ? TR.gi : 'pain');
+const giMode = () => (['pain', 'bloat', 'both'].includes(TR.gi) ? TR.gi : 'both');
 /* Value for part r (0 morning … 3 night): stomach pain, bloating (HealthLog v14), or the worse of the two. */
 function giPart(d, r) {
   const p = d[r + 1], b = d.length > 8 ? d[r + 8] : null, m = giMode();
@@ -2803,7 +2803,7 @@ function trendsClick(ev) {
   else if (act === 'sday') { TR.ssel = TR.ssel === v ? null : v; trendsRender(); if (TR.ssel) loadDayDetail(TR.ssel); }
   else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
   else if (act === 'med') { TR.med = v; LS.set('trends.med', v); trendsRender(); }
-  else if (act === 'gi') { TR.gi = v; LS.set('trends.gi', v); trendsRender(); }
+  else if (act === 'gi') { TR.gi = v; LS.set('trends.gi2', v); trendsRender(); }
   else if (act === 'pat-close') closePatterns();
   else if (act === 'pair') openSettings('pair');
 }
