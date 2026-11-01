@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v33 · 1 Nov';
+const APP_VERSION = 'v34 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -524,7 +524,8 @@ function suppFirst(map) {
   return out;
 }
 
-function historyView() {
+function historyView(mode) {
+  const health = mode === 'health';
   const data = medCounts();
   if (!data || !Object.keys(data).length) return '';
   const today = healthKey(new Date());
@@ -537,11 +538,12 @@ function historyView() {
   Object.keys(data).forEach((name) => {
     const d = data[name];
     const taken = keys.filter((k) => (d.byDay[k] || 0) > 0).length;
-    html += '<button type="button" class="hist-row" data-act="cal" data-v="' + esc(name) + '" aria-expanded="' + (S.calMed === name) + '" aria-label="' + esc(name) + ': logged on ' + taken + ' of the last 14 days. Show calendar">' +
+    const open = health ? TR.medOpen === name : S.calMed === name;
+    html += '<button type="button" class="hist-row' + (health && open ? ' open' : '') + '" ' + (health ? 'data-tr="medrow"' : 'data-act="cal"') + ' data-v="' + esc(name) + '" aria-expanded="' + open + '" aria-label="' + esc(name) + ': logged on ' + taken + ' of the last 14 days. Show calendar">' +
       '<span class="hist-name">' + esc(name) + '</span><span class="hist-cells">' +
       keys.map((k) => '<span class="' + cls(d.byDay[k] || 0, d.perDay, k) + '"></span>').join('') + '</span>' +
       '<span class="hist-n">' + taken + '/14</span></button>';
-    if (S.calMed === name) html += calendarView(name, d, today, cls);
+    if (!health && S.calMed === name) html += calendarView(name, d, today, cls);
   });
   return html + '</div>';
 }
@@ -2769,11 +2771,14 @@ function medsView(today) {
   if (!data) return '';
   const names = Object.keys(data);
   if (!names.length) return '';
-  const cur = TR.med && data[TR.med] ? TR.med : (names.find((n) => /omeprazole/i.test(n)) || names[0]);
+  const cur = TR.medOpen && data[TR.medOpen] ? TR.medOpen : names[0];
   const d = data[cur];
   const taken = Object.keys(d.byDay).filter((k) => d.byDay[k] > 0 && k <= today).sort();
   const firstKey = taken[0] || today;
-  let html = '<h2 class="tr-h">Medication</h2><div class="tr-chips tr-medchips">' + names.map((n) => '<button type="button" class="tr-chip" data-tr="med" data-v="' + esc(n) + '" aria-pressed="' + (n === cur) + '">' + esc(n) + '</button>').join('') + '</div>';
+  // v34: the Log tab's 14-day rows; tap one to open its full calendar below.
+  let html = '<h2 class="tr-h">Medication</h2><div class="tr-medhist">' + historyView('health') + '</div>';
+  if (!TR.medOpen || !data[TR.medOpen]) return html + '<p class="small tr-hint">Tap a medicine for its full calendar.</p>';
+  html += '<div class="tr-medsel"><b>' + esc(cur) + '</b></div>';
   html += calGrid('med-' + cur, cur + ' calendar', firstKey, today, (k) => {
     const n = d.byDay[k] || 0, day = keyToDate(k).getDate();
     const cls = ['tr-cell', n ? (d.perDay > 0 && n < d.perDay ? 'mpart' : 'mon') : 'moff'];
@@ -2842,7 +2847,7 @@ function trendsClick(ev) {
   }
   else if (act === 'sday') { TR.ssel = TR.ssel === v ? null : v; trendsRender(); if (TR.ssel) loadDayDetail(TR.ssel); }
   else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
-  else if (act === 'med') { TR.med = v; LS.set('trends.med', v); trendsRender(); }
+  else if (act === 'medrow') { TR.medOpen = TR.medOpen === v ? null : v; trendsRender(); }
   else if (act === 'gi') { TR.gi = v; LS.set('trends.gi2', v); trendsRender(); }
   else if (act === 'pat-close') closePatterns();
   else if (act === 'pair') openSettings('pair');

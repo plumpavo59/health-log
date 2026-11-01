@@ -598,3 +598,7 @@ html,body{overscroll-behavior-y:none}
 .sheet-today{margin-top:6px;border-top:1px solid var(--line3);padding-top:8px}
 .sheet-today .lrow{font-size:14px}
 .tr-gichips{margin:4px 0 6px}
+
+.tr-medhist .hist{border-top:0;padding-top:0}
+.tr-medhist .hist-row.open .hist-name{text-decoration:underline;text-underline-offset:3px}
+.tr-medsel{margin:14px 0 6px;font-size:15px}
