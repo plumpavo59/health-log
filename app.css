@@ -616,3 +616,4 @@ html,body{overscroll-behavior-y:none}
 .info-i{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;min-height:18px;padding:0;margin-left:6px;border-radius:50%;border:1px solid var(--line2);background:transparent;color:var(--muted2);font:italic 600 11px/1 Georgia,serif;vertical-align:3px;cursor:pointer}
 .info-i:hover{color:var(--ink);border-color:var(--muted2)}
 .tr-h-first{margin-top:4px}
+.eff-better{color:#2f8a4c}.eff-worse{color:#c8463f}

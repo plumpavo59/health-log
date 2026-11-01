@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v37 · 1 Nov';
+const APP_VERSION = 'v38 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -451,6 +451,35 @@ function planHtml(today, withCompare, listInPopup) {
   if (listInPopup === 'list') return (cfg.plan.note ? '<p class="small">' + esc(cfg.plan.note) + '</p>' : '') + listHtml;
   if (listInPopup) return svg + key + patBtn('plan', 'Step details') + (withCompare ? patBtn('steps', 'Compare steps') : '');
   return svg + key + (cfg.plan.note ? '<p class="small">' + esc(cfg.plan.note) + '</p>' : '') + (withCompare ? patBtn('steps', 'Compare steps') : '') + listHtml;
+}
+/* v38: symptoms since the current step started vs the 4 weeks before it. */
+function trialEffect(T2, today) {
+  const st = planSteps().find((x) => stepState(x, today) === 'now');
+  if (!st || !T2) return null;
+  const start = st.from, before0 = addDays(start, -28);
+  const since = T2.list.filter((x) => x.key >= start && x.key <= today), before = T2.list.filter((x) => x.key >= before0 && x.key < start);
+  const rows = TREND_SYMS.map((sm) => ({ name: sm.name, get: (d) => { const v = symVal(d, sm.k); return typeof v === 'number' ? (sm.inv ? 10 - v : v) : null; }, up: !!sm.inv }))
+    .concat([{ name: 'Stomach pain', get: (d) => (giNum(symVal(d, 'st')) ? symVal(d, 'st') : null) }, { name: 'Bloating', get: (d) => (giNum(symVal(d, 'b')) ? symVal(d, 'b') : null) },
+      { name: 'Sleep quality', get: (d) => (giNum(d.q) ? d.q : null), up: true }]);
+  const m = (arr, get) => mean1(arr.map((x) => get(x.d)).filter((v) => typeof v === 'number'));
+  const out = rows.map((r) => { const a = m(before, r.get), b = m(since, r.get); return { name: r.name, a, b, up: r.up, d: a !== null && b !== null ? b - a : null }; }).filter((r) => r.a !== null && r.b !== null);
+  const da = mean1(before.map((x) => x.load).filter(giNum)), db = mean1(since.map((x) => x.load).filter(giNum));
+  return { st, start, days: dayNum(start, today), rows: out, score: da !== null && db !== null ? { a: da, b: db, d: db - da } : null };
+}
+const effWord = (r) => { if (Math.abs(r.d) < 0.4) return { text: 'about the same', tone: 'same' }; const better = r.up ? r.d > 0 : r.d < 0; return { text: (r.d > 0 ? '+' : '−') + Math.abs(r.d).toFixed(1) + (better ? ' better' : ' worse'), tone: better ? 'better' : 'worse' }; };
+function trialEffectHtml(T2, today) {
+  const e = trialEffect(T2, today);
+  if (!e || !e.rows.length) return '';
+  const top = e.rows.filter((r) => Math.abs(r.d) >= 0.4).sort((x, y) => Math.abs(y.d) - Math.abs(x.d)).slice(0, 2);
+  const tile = (label, r) => { const w = effWord(r); return '<div class="tr-stat"><span>' + esc(label) + '</span><b class="eff-' + w.tone + '">' + esc(w.text === 'about the same' ? 'Same' : w.text.split(' ')[0]) + '</b><small>' + esc(r.a.toFixed(1) + ' → ' + r.b.toFixed(1) + (w.tone === 'same' ? '' : ' · ' + w.text.split(' ')[1])) + '</small></div>'; };
+  const tiles = (e.score ? [tile('Day score', Object.assign({ up: false }, e.score))] : []).concat(top.map((r) => tile(r.name, r)));
+  return '<div class="tr-sub">Since ' + esc(shortDate(e.start)) + ' (' + e.days + ' days) vs the 4 weeks before</div><div class="tr-stats">' + tiles.join('') + '</div>' + patBtn('trialfx', 'All symptoms since the trial started');
+}
+function trialEffectPop(T2, today) {
+  const e = trialEffect(T2, today);
+  if (!e) return null;
+  return { title: 'Since ' + e.st.label.replace(/^\d+\s*·\s*/, '') + ' started', comps: e.rows.map((r) => { const w = effWord(r); return { title: r.name, left: { label: '4 weeks before', value: r.a.toFixed(1) }, right: { label: 'Since ' + shortDate(e.start), value: r.b.toFixed(1) }, verdict: w.text.charAt(0).toUpperCase() + w.text.slice(1), tone: w.tone }; }),
+    note: 'Daily averages of your readings: ' + shortDate(addDays(e.start, -28)) + ' – ' + shortDate(addDays(e.start, -1)) + ' against ' + shortDate(e.start) + ' – today. Higher is better for mental clarity, mood and sleep quality; lower is better for the rest. Changes under 0.4 count as the same. Other things change too (sleep, activity, stress), so this shows what happened, not what caused it.' };
 }
 /* Compare steps: each step's judged days (last 7 of a long step) against the step before and the baseline. */
 function stepsCompare(T2, today) {
@@ -2332,11 +2361,11 @@ function trendsRender() {
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
   html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
   html += '<h2 class="tr-h">Day by day' + infoI('Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
-  html += stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + planHtml(today, today >= COMPARE_FROM, true) : '') + sleepView(T2);
+  html += stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + trialEffectHtml(T2, today) + planHtml(today, today >= COMPARE_FROM, true) : '') + sleepView(T2);
   html += fileLinks([['Health tracker', LINKS.healthSheet]]);
   if (TR.pop) {
     const G = giData();
-    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : null;
+    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : TR.pop === 'trialfx' ? trialEffectPop(T2, today) : null;
     html += patternsPopup(pop);
     TR.popFresh = false;
   }
