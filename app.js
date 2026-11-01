@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v31 · 1 Nov';
+const APP_VERSION = 'v32 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -2150,14 +2150,12 @@ function trendsDays() {
   const sy = cfg.symptoms;
   if (!sy || !Array.isArray(sy.days) || !sy.startKey) return null;
   const today = sy.todayKey || addDays(sy.startKey, sy.days.length - 1);
-  const localFlare = {};
-  recent.forEach((r) => { if (r.kind === 'flare' && r.status !== 'failed' && r.hday) localFlare[r.hday] = true; });
   const list = sy.days.map((d, i) => {
     const key = addDays(sy.startKey, i);
     const have = incSyms().filter((x) => typeof symVal(d, x.k) === 'number');
     const load = have.length ? have.reduce((a, x) => a + symVal(d, x.k), 0) / have.length : null;
     const readings = d.c ? Math.max.apply(null, [0].concat(have.map((x) => d.c[x.k] || 0))) : (d.n || 0);
-    return { key, d, load, scores: have.length, readings, enough: load !== null && readings >= MIN_READINGS, flag: !!(d.fl || localFlare[key]) };
+    return { key, d, load, scores: have.length, readings, enough: load !== null && readings >= MIN_READINGS, flag: false };
   });
   const enoughDays = list.filter((x) => x.enough);
   const usualOf = (vals, all) => (vals.length >= USUAL_MIN ? median(vals) : all.length >= USUAL_MIN ? median(all) : null);
@@ -2178,29 +2176,44 @@ function trendsDays() {
     const avg = devs.length ? devs.reduce((t, v) => t + v, 0) / devs.length : null, max = devs.length ? Math.max.apply(null, devs) : null;
     x.cls = !x.enough || avg === null ? (x.load !== null ? 'thin' : 'none')
       : max >= SYM_MUCH || avg >= AVG_MUCH ? 'much' : max >= SYM_WORSE || avg >= AVG_WORSE ? 'worse' : avg <= AVG_BETTER && max < 0.5 ? 'better' : 'usual';
-    x.flare = x.flag || x.cls === 'much';
   });
+  markFlares(list);
   const by = {};
   list.forEach((x) => { by[x.key] = x; });
   return { list, by, today, marks: Array.isArray(sy.marks) ? sy.marks : [], means: list.some((x) => x.d.a) };
 }
-/* Flare episodes: days you marked, joined with the worse days either side; "possible" = runs of much-worse days you didn't mark. */
-function flareEpisodes(list) {
-  const eps = [];
-  let cur = null;
+/* v32 flares, worked out automatically (nothing marked by hand; "Flare" notes are ignored).
+   A flare day is a day much worse than usual, or a Very tired / Weak moment followed by a worse or much-worse
+   next day (both days count). A flare is 2+ flare days in a row, plus the worse days either side.
+   A single much-worse day on its own is a "bad day" (ring), not a flare. */
+function markFlares(list) {
+  const bad = (x) => x && (x.cls === 'worse' || x.cls === 'much');
+  list.forEach((x) => { x.fday = x.cls === 'much'; x.flare = false; x.badDay = false; });
   list.forEach((x, i) => {
-    const bad = x.flag || x.cls === 'much' || (cur && (x.cls === 'worse'));
-    if (bad) {
-      if (!cur) {
-        cur = { from: x.key, to: x.key, marked: x.flag, days: 1 };
-        // pull in worse days just before a marked day
-        for (let j = i - 1; j >= 0 && (list[j].cls === 'worse' || list[j].cls === 'much') && (!eps.length || list[j].key > eps[eps.length - 1].to); j--) { cur.from = list[j].key; cur.days++; }
-      } else { cur.to = x.key; cur.days++; cur.marked = cur.marked || x.flag; }
-    } else if (cur) { eps.push(cur); cur = null; }
+    if ((x.d.mv || x.d.mw) && bad(list[i + 1])) { x.fday = true; list[i + 1].fday = true; }
   });
-  if (cur) eps.push(cur);
-  return eps.filter((e) => e.marked || list.some((x) => x.key >= e.from && x.key <= e.to && x.cls === 'much'));
+  const eps = [];
+  for (let i = 0; i < list.length; i++) {
+    if (!list[i].fday) continue;
+    let a = i, b = i;
+    while (b + 1 < list.length && list[b + 1].fday) b++;
+    const runEnd = b;
+    if (b > a) {
+      while (a > 0 && bad(list[a - 1]) && !list[a - 1].flare) a--;
+      while (b + 1 < list.length && bad(list[b + 1]) && !list[b + 1].fday) b++;
+      const days = list.slice(a, b + 1);
+      days.forEach((y) => { y.flare = true; });
+      const why = [];
+      TREND_SYMS.forEach((sm) => { if (days.some((y) => (y.dev || {})[sm.k] >= SYM_WORSE)) why.push(sm.name.toLowerCase()); });
+      if (days.some((y) => y.d.mv)) why.push('very tired');
+      if (days.some((y) => y.d.mw)) why.push('weak');
+      eps.push({ from: list[a].key, to: list[b].key, days: b - a + 1, why });
+      i = b;
+    } else { list[i].badDay = true; i = runEnd; }
+  }
+  list.flareEps = eps;
 }
+function flareEpisodes(list) { return list.flareEps || []; }
 const rangeText = (e) => { const a = keyToDate(e.from), b = keyToDate(e.to); const f = (d, m) => d.toLocaleDateString('en-GB', m ? { weekday: 'short', day: 'numeric', month: 'short' } : { weekday: 'short', day: 'numeric' });
   return e.from === e.to ? f(a, true) : f(a, a.getMonth() !== b.getMonth()) + ' – ' + f(b, true); };
 
@@ -2269,34 +2282,33 @@ function trendsRender() {
   const l28 = last(28, 0);
   const rough = l28.filter((x) => x.cls === 'worse' || x.cls === 'much').length;
   const eps = flareEpisodes(list).filter((e) => e.to > addDays(today, -28));
-  const possible = eps.filter((e) => !e.marked);
   const wkDiff = (() => { const v = last(7, 0).filter((x) => x.enough && x.usual !== null); return v.length ? v.reduce((t, x) => t + x.load - x.usual, 0) / v.length : null; })();
   let html = '<div class="tr-stats">' +
     '<div class="tr-stat"><span>Rough days</span><b>' + rough + '</b><small>last 4 weeks</small></div>' +
-    '<div class="tr-stat"><span>Flares</span><b>' + eps.length + '</b><small>' + (possible.length ? 'from your scores' : 'last 4 weeks') + '</small></div>' +
+    '<div class="tr-stat"><span>Flares</span><b>' + eps.length + '</b><small>last 4 weeks</small></div>' +
     '<div class="tr-stat"><span>This week</span><b>' + (wkDiff === null ? '–' : Math.abs(wkDiff) < 0.25 ? 'Usual' : (wkDiff > 0 ? '+' : '−') + Math.abs(wkDiff).toFixed(1)) + '</b><small>' + (wkDiff !== null && Math.abs(wkDiff) < 0.25 ? 'about your usual' : 'vs your usual') + '</small></div></div>';
-  if (eps.length) html += '<div class="tr-eps">' + eps.slice(-3).reverse().map((e) => '<div class="tr-ep' + (e.marked ? '' : ' possible') + '"><i></i>' + esc(rangeText(e)) + ' · ' + e.days + (e.days === 1 ? ' day' : ' days') + (e.marked ? '' : ' · from your scores') + '</div>').join('') + '</div>';
+  if (eps.length) html += '<div class="tr-eps">' + eps.slice(-3).reverse().map((e) => '<div class="tr-ep"><i></i>' + esc(rangeText(e)) + ' · ' + e.days + (e.days === 1 ? ' day' : ' days') + (e.why.length ? ' · ' + esc(e.why.join(', ')) : '') + '</div>').join('') + '</div>';
 
   html += '<div class="tr-inc"><span>Day score uses</span>' + TREND_SYMS.map((x) => '<button type="button" class="tr-chip" data-tr="inc" data-v="' + x.k + '" aria-pressed="' + TR.inc.includes(x.k) + '">' + esc(x.name) + '</button>').join('') + '</div>';
   // Calendar: scrollable, opens on the latest weeks.
   const CLS = { better: 'hb', usual: 'h1', worse: 'h3', much: 'h4', thin: 'thin' };
   const WORD = { better: 'better than usual', usual: 'about usual', worse: 'worse than usual', much: 'much worse than usual', thin: 'only one reading' };
-  const firstData = (list.find((x) => x.load !== null || x.flag) || {}).key;
+  const firstData = (list.find((x) => x.load !== null) || {}).key;
   html += calGrid('health', 'Symptom calendar', firstData, today, (k) => {
     const x = by[k], n = keyToDate(k).getDate();
     const cls = ['tr-cell'];
     if (k === today) cls.push('today');
     if (k === TR.sel) cls.push('sel');
-    const mark = x && x.flag ? '<i class="tr-flare"></i>' : x && x.cls === 'much' ? '<i class="tr-flare ring"></i>' : '';
+    const mark = x && x.flare ? '<i class="tr-flare"></i>' : x && x.badDay ? '<i class="tr-flare ring"></i>' : '';
     if (x && x.cls !== 'none') {
       cls.push(CLS[x.cls] || 'h1');
-      return '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + ', ' + WORD[x.cls] + (x.flag ? ', flare' : '') + '">' + n + mark + '</button>';
+      return '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + ', ' + WORD[x.cls] + (x.flare ? ', flare' : x.badDay ? ', bad day' : '') + '">' + n + mark + '</button>';
     }
     cls.push('empty');
-    return '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + (x && x.flag ? ', flare' : ', no check-in') + '">' + n + mark + '</button>';
+    return '<button type="button" class="' + cls.join(' ') + '" data-tr="day" data-v="' + k + '" aria-label="' + esc(longDate(k)) + (x && x.flare ? ', flare' : ', no check-in') + '">' + n + mark + '</button>';
   });
   html += '<div class="tr-key"><span class="tr-kc"><i class="hb"></i>Better</span><span class="tr-kc"><i class="h1"></i>Usual</span><span class="tr-kc"><i class="h3"></i>Worse</span><span class="tr-kc"><i class="h4"></i>Much worse</span>' +
-    '<span><i class="tr-flare inline ring"></i>Flare (from your scores)</span>' + (list.some((x) => x.flag) ? '<span><i class="tr-flare inline"></i>Flare (noted)</span>' : '') + '</div>';
+    '<span><i class="tr-flare inline"></i>Flare</span><span><i class="tr-flare inline ring"></i>Bad day</span></div>';
 
   // Detail for the chosen day, with its 24-hour strip.
   const sel = TR.sel && TR.sel <= today ? TR.sel : null;
@@ -2304,10 +2316,10 @@ function trendsRender() {
     const x = by[sel];
     const vals = x ? TREND_SYMS.filter((sm) => typeof symVal(x.d, sm.k) === 'number').map((sm) => sm.name.toLowerCase() + ' ' + (sm.inv ? Math.round((10 - symVal(x.d, sm.k)) * 10) / 10 : symVal(x.d, sm.k))) : [];
     html += '<p class="tr-detail"><b>' + esc(longDate(sel)) + '</b> · ' + (x && x.load !== null
-      ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') + (x.flag ? ' · flare noted' : '') + ' · ' + vals.join(', ') +
+      ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') + (x.flare ? ' · part of a flare' : x.badDay ? ' · bad day' : '') + ' · ' + vals.join(', ') +
         (Object.keys(x.dev || {}).filter((kk) => x.dev[kk] >= SYM_WORSE).length ? ' · above usual: ' + Object.keys(x.dev).filter((kk) => x.dev[kk] >= SYM_WORSE).map((kk) => { const t = TREND_SYMS.find((y) => y.k === kk); return t.name.toLowerCase() + (t.inv ? ' −' : ' +') + x.dev[kk].toFixed(1); }).join(', ') : '') +
         (x.readings ? ' · ' + x.readings + (x.readings === 1 ? ' reading' : ' readings') : '') + (T2.means ? '' : ' · daily highs')
-      : (x && x.flag ? 'flare noted · ' : '') + (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>' + dayStrip(sel);
+      : (x && x.flare ? 'part of a flare · ' : '') + (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>' + dayStrip(sel);
   } else html += '<p class="tr-detail muted">Tap a day for its scores and a 24-hour view.</p>';
 
   // Chart chips + chart.
@@ -2316,7 +2328,7 @@ function trendsRender() {
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
   html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
   html += momentsHealth(T2, today) + stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + planHtml(today, today >= COMPARE_FROM, true) : '') + sleepView(T2);
-  html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. A ring marks a day much worse than usual; runs of those (with the worse days around them) show as flares. Days run 04:00 to 04:00.</p>' +
+  html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. A flare is 2+ days in a row much worse than usual (a Very tired or Weak moment followed by a worse next day counts too), joined with the worse days either side; a single much-worse day is a bad day (ring). Days run 04:00 to 04:00.</p>' +
     fileLinks([['Health tracker', LINKS.healthSheet]]);
   if (TR.pop) {
     const G = giData();
@@ -2371,7 +2383,7 @@ function trendsChart(T2) {
   if (TR.on.includes('load')) {
     const get = (x) => x.load;
     svg += '<path d="' + path(get) + '" fill="none" class="tr-load"/>' + dots(get, 'tr-loaddot');
-    list.forEach((x, i) => { if (x.flare && x.load !== null) svg += '<circle cx="' + X(i) + '" cy="' + Y(x.load) + '" r="3.6" class="tr-flaredot' + (x.flag ? '' : ' ring') + '"/>'; });
+    list.forEach((x, i) => { if ((x.flare || x.badDay) && x.load !== null) svg += '<circle cx="' + X(i) + '" cy="' + Y(x.load) + '" r="3.6" class="tr-flaredot' + (x.flare ? '' : ' ring') + '"/>'; });
   }
   // Activity load as thin bars under the chart, on the same days.
   if (hasAct) {
