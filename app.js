@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v32 · 1 Nov';
+const APP_VERSION = 'v33 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -2104,7 +2104,8 @@ const TREND_SYMS = [
   { k: 's', name: 'Stiffness', color: '#1baf7a', dash: '6 3' },
   { k: 'f', name: 'Fatigue', color: '#d99200', dash: '2 3' },
   { k: 'g', name: 'Mental clarity', color: '#7a68e0', dash: '8 3 2 3', inv: true },  // stored in fog direction; shown as 10 − value
-  { k: 'h', name: 'Headache', color: '#e0679a', dash: '1 4' }
+  { k: 'h', name: 'Headache', color: '#e0679a', dash: '1 4' },
+  { k: 'm', name: 'Mood', color: '#8d6e3f', dash: '4 2', inv: true }  // stored as 10 − mood (higher = worse); shown as mood
 ];
 /* Tuning: how far from usual counts as better / worse / much worse, and the evidence needed.
    Tested on 4–28 Oct: averaging pain, stiffness and fatigue hides single-symptom bad days (a fatigue day
@@ -2114,9 +2115,9 @@ const TREND_SYMS = [
 const COMPARE_FROM = '2026-12-01';
 const USUAL_DAYS = 28, USUAL_MIN = 5, MIN_READINGS = 2;
 const SYM_WORSE = 1.0, SYM_MUCH = 2.0, AVG_WORSE = 0.5, AVG_MUCH = 1.25, AVG_BETTER = -0.75;
-const TR = { gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f']), days: {} };
+const TR = { gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc3', TREND_SYMS.map((x) => x.k)), days: {} };
 // Brain fog and headache are off by default now; move anyone still on the old default.
-if (TR.inc.length === 5 && ['p', 's', 'f', 'g', 'h'].every((k) => TR.inc.includes(k))) { TR.inc = ['p', 's', 'f']; LS.set('trends.inc', TR.inc); }
+
 const incSyms = () => TREND_SYMS.filter((x) => TR.inc.includes(x.k));
 const TRENDS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v16h16"/><path d="m7.5 14.5 3.5-4 3 2.5 5-6"/></svg>';
 
@@ -2190,7 +2191,8 @@ function markFlares(list) {
   const bad = (x) => x && (x.cls === 'worse' || x.cls === 'much');
   list.forEach((x) => { x.fday = x.cls === 'much'; x.flare = false; x.badDay = false; });
   list.forEach((x, i) => {
-    if ((x.d.mv || x.d.mw) && bad(list[i + 1])) { x.fday = true; list[i + 1].fday = true; }
+    // You're often tired, so a Very tired / Weak moment only counts when the next day is much worse.
+    if ((x.d.mv || x.d.mw) && list[i + 1] && list[i + 1].cls === 'much') { x.fday = true; list[i + 1].fday = true; }
   });
   const eps = [];
   for (let i = 0; i < list.length; i++) {
@@ -2327,8 +2329,8 @@ function trendsRender() {
   html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
   html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
-  html += momentsHealth(T2, today) + stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + planHtml(today, today >= COMPARE_FROM, true) : '') + sleepView(T2);
-  html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. A flare is 2+ days in a row much worse than usual (a Very tired or Weak moment followed by a worse next day counts too), joined with the worse days either side; a single much-worse day is a bad day (ring). Days run 04:00 to 04:00.</p>' +
+  html += stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + planHtml(today, today >= COMPARE_FROM, true) : '') + sleepView(T2);
+  html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. A flare is 2+ days in a row much worse than usual (a Very tired or Weak moment followed by a much-worse next day counts too), joined with the worse days either side; a single much-worse day is a bad day (ring). Days run 04:00 to 04:00.</p>' +
     fileLinks([['Health tracker', LINKS.healthSheet]]);
   if (TR.pop) {
     const G = giData();
@@ -2836,7 +2838,7 @@ function trendsClick(ev) {
   else if (act === 'inc') {
     TR.inc = TR.inc.includes(v) ? TR.inc.filter((x) => x !== v) : TR.inc.concat(v);
     if (!TR.inc.length) TR.inc = [v];
-    LS.set('trends.inc', TR.inc); trendsRender();
+    LS.set('trends.inc3', TR.inc); trendsRender();
   }
   else if (act === 'sday') { TR.ssel = TR.ssel === v ? null : v; trendsRender(); if (TR.ssel) loadDayDetail(TR.ssel); }
   else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
