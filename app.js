@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v29 · 1 Nov';
+const APP_VERSION = 'v30 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -490,8 +490,9 @@ function medCounts() {
   if (!h || !Array.isArray(h.meds)) return null;
   const map = {};
   h.meds.forEach((m) => {
-    const byDay = {}, mg = Array.isArray(m.mg) ? {} : null, unknown = {};
+    const byDay = {}, mg = Array.isArray(m.mg) ? {} : null, unknown = {}, names = {};
     (m.counts || []).forEach((n, i) => { if (n) byDay[addDays(h.startKey, i)] = n; });
+    if (Array.isArray(m.names)) m.names.forEach((l, i) => { if (l && l.length) names[addDays(h.startKey, i)] = l.slice(); });
     if (mg) m.mg.forEach((n, i) => { const k = addDays(h.startKey, i); if (n) mg[k] = n; if ((m.mgUnknown || [])[i]) unknown[k] = true; });
     recent.forEach((r) => {
       if (r.kind === 'meds' && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)) {
@@ -502,14 +503,24 @@ function medCounts() {
       if (m.supps && r.kind === 'supps' && r.status !== 'saved' && r.status !== 'failed' && (r.supps || []).length) {
         const k = r.hday || r.day, due = Number(r.due) || 1;
         byDay[k] = Math.max(byDay[k] || 0, r.supps.length >= due ? 2 : 1);
+        names[k] = (names[k] || []).concat(r.supps.filter((x) => !(names[k] || []).includes(x)));
       }
     });
-    map[m.name] = { perDay: m.perDay || 1, byDay, mg, unknown, supps: !!m.supps };
+    map[m.name] = { perDay: m.perDay || 1, byDay, mg, unknown, supps: !!m.supps, names };
   });
-  return map;
+  // v30: Supplements sit just above the as-needed medicines (Per day 0, e.g. co-codamol, paracetamol).
+  return suppFirst(map);
 }
 
 const suppWord = (n) => (n >= 2 ? 'all due taken' : 'some taken');
+const asNeeded = (name) => (cfg.meds || []).some((m) => m.name === name && Number(m.perDay) === 0);
+function suppFirst(map) {
+  if (!map.Supplements) return map;
+  const out = {};
+  Object.keys(map).forEach((n) => { if (asNeeded(n) && !out.Supplements) out.Supplements = map.Supplements; if (n !== 'Supplements') out[n] = map[n]; });
+  if (!out.Supplements) out.Supplements = map.Supplements;
+  return out;
+}
 
 function historyView() {
   const data = medCounts();
@@ -546,7 +557,7 @@ function calendarView(name, d, today, cls) {
     const date = keyToDate(k);
     const label = date.getDate() === 1 ? '<small style="font-size:11px">1 ' + date.toLocaleDateString('en-GB', { month: 'short' }) + '</small>' : date.getDate();
     const amount = d.mg && n ? (d.mg[k] ? d.mg[k] + (d.unknown[k] ? '+' : '') : '?') : '';
-    cells += '<span class="d ' + cls(n, d.perDay, k) + (d.mg ? ' dosed' : '') + '" title="' + esc(k) + (n ? ': ' + (d.supps ? suppWord(n) : n) + (amount ? ' · ' + amount + ' mg' : '') : '') + '">' +
+    cells += '<span class="d ' + cls(n, d.perDay, k) + (d.mg ? ' dosed' : '') + '" title="' + esc(k) + (n ? ': ' + (d.supps ? suppWord(n) + (d.names[k] ? ': ' + d.names[k].join(', ') : '') : n) + (amount ? ' · ' + amount + ' mg' : '') : '') + '">' +
       (d.mg ? '<span>' + label + '</span><i>' + amount + '</i>' : label) + '</span>';
   }
   const count = (days) => Array.from({ length: days }, (_, i) => addDays(today, -i)).filter((k) => (d.byDay[k] || 0) > 0).length;
@@ -763,9 +774,12 @@ function sheetView() {
     const sup = suppList();
     const n = S.meds.length + (S.suppOn && S.supps.length ? 1 : 0);
     btn = '<button type="button" class="log" data-act="meds"' + (n ? '' : ' disabled') + '>' + (n ? 'Log ' + n : 'Log') + '</button>';
-    body = '<div class="chips">' + (cfg.meds || []).map((m) =>
-      '<button type="button" class="chip med" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><small class="dose-top">' + esc(chipDoseTop(m)) + '</small><span class="med-name"><b>' + esc(m.name) + '</b>' + takenMark(m) + '</span></button>').join('') +
-      (sup.length ? '<button type="button" class="chip med" data-act="supp-toggle" aria-pressed="' + S.suppOn + '"><small class="dose-top">' + sup.length + ' to choose</small><span class="med-name"><b>Supplements</b>' + (suppDoneToday() ? '<span class="taken" aria-label="logged today">✓</span>' : '') + '</span></button>' : '') +
+    const suppChip = sup.length ? '<button type="button" class="chip med" data-act="supp-toggle" aria-pressed="' + S.suppOn + '"><small class="dose-top">' + sup.length + ' to choose</small><span class="med-name"><b>Supplements</b>' + (suppDoneToday() ? '<span class="taken" aria-label="logged today">✓</span>' : '') + '</span></button>' : '';
+    let suppPlaced = false;
+    body = '<div class="chips">' + (cfg.meds || []).map((m) => {
+      const pre = !suppPlaced && Number(m.perDay) === 0 ? (suppPlaced = true, suppChip) : '';
+      return pre + '<button type="button" class="chip med" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><small class="dose-top">' + esc(chipDoseTop(m)) + '</small><span class="med-name"><b>' + esc(m.name) + '</b>' + takenMark(m) + '</span></button>';
+    }).join('') + (suppPlaced ? '' : suppChip) +
       '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' + doseRows() + suppRow() + historyView();
   } else if (S.sheet === 'bowel') {
     btn = '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button>';
@@ -2747,7 +2761,7 @@ function medsView(today) {
     const cls = ['tr-cell', n ? (d.perDay > 0 && n < d.perDay ? 'mpart' : 'mon') : 'moff'];
     if (k === today) cls.push('today');
     const amount = d.mg && n ? (d.mg[k] ? d.mg[k] + (d.unknown[k] ? '+' : '') : '?') : '';
-    return '<span class="' + cls.join(' ') + '" data-tip="' + esc(longDate(k) + ' · ' + (n ? (d.supps ? suppWord(n) : n + (n === 1 ? ' dose' : ' doses')) + (amount ? ' · ' + amount + ' mg' : '') : 'none logged')) + '">' + day + (amount ? '<i class="tr-mg">' + amount + '</i>' : '') + '</span>';
+    return '<span class="' + cls.join(' ') + '" data-tip="' + esc(longDate(k) + ' · ' + (n ? (d.supps ? suppWord(n) + (d.names[k] ? ': ' + d.names[k].join(', ') : '') : n + (n === 1 ? ' dose' : ' doses')) + (amount ? ' · ' + amount + ' mg' : '') : 'none logged')) + '">' + day + (amount ? '<i class="tr-mg">' + amount + '</i>' : '') + '</span>';
   });
   // How long: the current run (gaps of up to 3 days allowed), the last 14 days, and the first day in the data.
   const stats = [];

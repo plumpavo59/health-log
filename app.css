@@ -57,7 +57,7 @@ a{color:inherit}
 .notice button{margin-top:10px}
 
 /* ================= LOG view (.lv) ================= */
-.lv{max-width:520px;display:flex;flex-direction:column;gap:12px}
+.lv{max-width:650px;display:flex;flex-direction:column;gap:12px}
 .lv header{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;padding:12px 0 2px}
 .eyebrow{font-size:11px;letter-spacing:.08em;color:var(--muted)}
 .lv h1{margin:0;font-size:25px;line-height:1.1}
@@ -317,7 +317,7 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
 /* v11: Trends tab (symptom calendar + chart) */
 :root{--h0:#faece7;--h1:#f5c4b3;--h2:#f0997b;--h3:#d85a30;--h4:#993c1d;--hi0:#4a1b0c;--hi1:#4a1b0c;--hi2:#4a1b0c;--hi3:#fff;--hi4:#fff;--flare:#d03b3b}
 :root[data-theme=dark]{--h0:#2a1712;--h1:#4a2418;--h2:#712b13;--h3:#b2482a;--h4:#e06a43;--hi0:#e8c9bd;--hi1:#f0d3c7;--hi2:#f5d5c8;--hi3:#fff;--hi4:#1a0904;--flare:#ff7b7b}
-.trv{max-width:520px}
+.trv{max-width:650px}
 .tr-center{text-align:center}
 .tr-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:2px 0 14px}
 .tr-stat{background:var(--soft);border-radius:12px;padding:10px 11px;display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -436,7 +436,7 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
 .focus-proxy{position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;pointer-events:none}
 body.sheet-open{overflow:hidden}
 .sheet-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.38);z-index:39}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:40;max-width:560px;margin:0 auto;max-height:88vh;overflow-y:auto;overscroll-behavior:contain;
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:40;max-width:650px;margin:0 auto;max-height:88vh;overflow-y:auto;overscroll-behavior:contain;
   background:var(--card);border:1px solid var(--ink);border-bottom:0;border-radius:18px 18px 0 0;padding:4px 16px calc(18px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
 .sheet.fresh{animation:hq-sheet-up .22s ease-out}
 .sheet-backdrop.fresh{animation:hq-fade .2s ease-out}
