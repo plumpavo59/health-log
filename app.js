@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v28 · 1 Nov';
+const APP_VERSION = 'v29 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -498,11 +498,18 @@ function medCounts() {
         const k = r.hday || r.day; byDay[k] = (byDay[k] || 0) + 1;
         if (mg) { const n = doseMg((r.doses || {})[m.name]); if (n === null) unknown[k] = true; else mg[k] = (mg[k] || 0) + n; }
       }
+      // v29: supplements not yet in the server's history (2 = all due, 1 = some).
+      if (m.supps && r.kind === 'supps' && r.status !== 'saved' && r.status !== 'failed' && (r.supps || []).length) {
+        const k = r.hday || r.day, due = Number(r.due) || 1;
+        byDay[k] = Math.max(byDay[k] || 0, r.supps.length >= due ? 2 : 1);
+      }
     });
-    map[m.name] = { perDay: m.perDay || 1, byDay, mg, unknown };
+    map[m.name] = { perDay: m.perDay || 1, byDay, mg, unknown, supps: !!m.supps };
   });
   return map;
 }
+
+const suppWord = (n) => (n >= 2 ? 'all due taken' : 'some taken');
 
 function historyView() {
   const data = medCounts();
@@ -539,7 +546,7 @@ function calendarView(name, d, today, cls) {
     const date = keyToDate(k);
     const label = date.getDate() === 1 ? '<small style="font-size:11px">1 ' + date.toLocaleDateString('en-GB', { month: 'short' }) + '</small>' : date.getDate();
     const amount = d.mg && n ? (d.mg[k] ? d.mg[k] + (d.unknown[k] ? '+' : '') : '?') : '';
-    cells += '<span class="d ' + cls(n, d.perDay, k) + (d.mg ? ' dosed' : '') + '" title="' + esc(k) + (n ? ': ' + n + (amount ? ' · ' + amount + ' mg' : '') : '') + '">' +
+    cells += '<span class="d ' + cls(n, d.perDay, k) + (d.mg ? ' dosed' : '') + '" title="' + esc(k) + (n ? ': ' + (d.supps ? suppWord(n) : n) + (amount ? ' · ' + amount + ' mg' : '') : '') + '">' +
       (d.mg ? '<span>' + label + '</span><i>' + amount + '</i>' : label) + '</span>';
   }
   const count = (days) => Array.from({ length: days }, (_, i) => addDays(today, -i)).filter((k) => (d.byDay[k] || 0) > 0).length;
@@ -547,7 +554,7 @@ function calendarView(name, d, today, cls) {
   return '<div class="cal"><div class="cal-sum">' + esc(name) + ' · last 7 days ' + count(7) + ' · last 14 ' + count(14) + ' · last 6 weeks ' + count(42) +
     (d.mg ? ' · 7-day total ' + week + ' mg' : '') + '</div>' +
     '<div class="cal-grid">' + ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((x) => '<span class="dow">' + x + '</span>').join('') + cells + '</div>' +
-    '<div class="cal-sum">Dark = logged' + (d.mg ? ' · small number = mg that day (? = dose not recorded)' : '') + (d.perDay > 1 ? ' · half = some of ' + d.perDay + ' doses' : '') + ' · before 4am counts as the night before</div></div>';
+    '<div class="cal-sum">Dark = logged' + (d.mg ? ' · small number = mg that day (? = dose not recorded)' : '') + (d.supps ? ' · half = some of the ones due (Default on the Meds tab)' : d.perDay > 1 ? ' · half = some of ' + d.perDay + ' doses' : '') + ' · before 4am counts as the night before</div></div>';
 }
 
 function checkinView() {
@@ -1141,7 +1148,8 @@ function logAct(el) {
     if (!S.meds.length && !sup.length) return;
     const at = S.time;
     if (sup.length) {
-      commit('supps', { supps: sup }, 'Supplements: ' + sup.join(', '), { supps: sup });
+      const due = suppList().filter((x) => x.def).length;
+      commit('supps', { supps: sup, due }, 'Supplements: ' + sup.join(', '), { supps: sup, due });
       S.time = at;
     }
     S.suppOn = false; S.supps = [];
@@ -2739,7 +2747,7 @@ function medsView(today) {
     const cls = ['tr-cell', n ? (d.perDay > 0 && n < d.perDay ? 'mpart' : 'mon') : 'moff'];
     if (k === today) cls.push('today');
     const amount = d.mg && n ? (d.mg[k] ? d.mg[k] + (d.unknown[k] ? '+' : '') : '?') : '';
-    return '<span class="' + cls.join(' ') + '" data-tip="' + esc(longDate(k) + ' · ' + (n ? n + (n === 1 ? ' dose' : ' doses') + (amount ? ' · ' + amount + ' mg' : '') : 'none logged')) + '">' + day + (amount ? '<i class="tr-mg">' + amount + '</i>' : '') + '</span>';
+    return '<span class="' + cls.join(' ') + '" data-tip="' + esc(longDate(k) + ' · ' + (n ? (d.supps ? suppWord(n) : n + (n === 1 ? ' dose' : ' doses')) + (amount ? ' · ' + amount + ' mg' : '') : 'none logged')) + '">' + day + (amount ? '<i class="tr-mg">' + amount + '</i>' : '') + '</span>';
   });
   // How long: the current run (gaps of up to 3 days allowed), the last 14 days, and the first day in the data.
   const stats = [];
@@ -2755,7 +2763,7 @@ function medsView(today) {
   }
   html += stats.length ? '<div class="pt-stats tr-medstats">' + stats.map((x) => '<div class="pt-cell"><span>' + esc(x.label) + '</span><b>' + esc(x.value) + '</b><small>' + esc(x.sub) + '</small></div>').join('') + '</div>'
     : '<p class="small">No ' + esc(cur) + ' logged in the last four months.</p>';
-  return html + '<p class="small tr-hint">Dark = logged' + (d.perDay > 1 ? ', half = some of ' + d.perDay + ' doses' : '') + (d.mg ? ', small number = mg' : '') + '. Counts logged doses only; before 4am counts as the night before.</p>';
+  return html + '<p class="small tr-hint">Dark = logged' + (d.supps ? ', half = some of the ones due' : d.perDay > 1 ? ', half = some of ' + d.perDay + ' doses' : '') + (d.mg ? ', small number = mg' : '') + '. Counts logged doses only; before 4am counts as the night before.</p>';
 }
 /* Sleep: averages, then the next day's score after early vs late, long vs short, good vs poor nights. */
 function sleepPatterns(T2) {
