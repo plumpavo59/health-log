@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v34 · 1 Nov';
+const APP_VERSION = 'v35 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -2722,47 +2722,65 @@ async function loadDayDetail(k) {
 /* ---------- Sleep: quality, hours slept and bedtime (from wake and bed check-ins), and how days compare ---------- */
 const bedMinutes = (bt) => { const m = /^(\d{2}):(\d{2})$/.exec(bt || ''); if (!m) return null; const v = Number(m[1]) * 60 + Number(m[2]); return v < 12 * 60 ? v + 1440 : v; };
 const clockText = (mins) => { const v = Math.round(mins) % 1440; return pad(Math.floor(v / 60)) + ':' + pad(v % 60); };
+/* v35 sleep: summary of the last 7 nights against the 28 before, then one "sleep window" chart:
+   each night a bar from went-to-sleep down to woke (pale extension = in bed until getting up), shaded by quality. */
+const clockMin = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ''); if (!m) return null; const v = Number(m[1]) * 60 + Number(m[2]); return v < 21 * 60 ? v + 1440 : v; };
+function nightOf(d) {
+  const bed = bedMinutes(d.bt);
+  let woke = clockMin(d.wk);
+  if (bed !== null && woke === null && giNum(d.sl)) woke = bed + d.sl * 60;
+  if (bed !== null && woke !== null && woke <= bed) woke = null;
+  let up = clockMin(d.up);
+  if (up !== null && (woke === null || up < woke)) up = null;
+  const hours = bed !== null && woke !== null ? (woke - bed) / 60 : giNum(d.sl) ? d.sl : null;
+  return { bed, woke, up, hours, q: giNum(d.q) ? d.q : null };
+}
 function sleepView(T2) {
   const list = T2.list.slice(-42), n = list.length;
-  const tipOf = (d) => [longDate(d.key), d.d.bt ? 'bed ' + d.d.bt : '', d.d.wk ? 'woke ' + d.d.wk : '', d.d.up ? 'up ' + d.d.up : '',
-    giNum(d.d.sl) ? d.d.sl + ' h in bed' : '', giNum(d.d.q) ? 'quality ' + d.d.q + '/10' : '', giNum(d.d.z) ? 'disturbed ' + d.d.z + '/5' : ''].filter(Boolean);
-  const hits = (H) => list.map((d, i) => { const t = tipOf(d); return t.length > 1 ? '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (H - 12) + '" class="tr-hit" data-tip="' + esc(t.join(' · ')) + '"/>' : ''; }).join('');
-  const W = 360, L = 30, R = 4, bw = (W - L - R) / n;
-  const x = (i) => L + i * bw;
-  const axis = (H) => '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(list[0].key)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(list[n - 1].key)) + '</text>';
-  const bars = (get, max, cls, bad, label, unit) => {
-    const H = 64, base = H - 12, top = 4;
-    let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + label + '">' +
-      '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + base + '" y2="' + base + '" class="tr-grid"/>' +
-      '<text x="' + (L - 4) + '" y="' + (top + 6) + '" class="tr-ax" text-anchor="end">' + max + '</text>';
-    list.forEach((d, i) => {
-      const v = get(d);
-      if (typeof v !== 'number') return;
-      const h = Math.max(2, (Math.min(v, max) / max) * (base - top));
-      svg += '<rect x="' + (x(i) + 1).toFixed(1) + '" y="' + (base - h).toFixed(1) + '" width="' + Math.max(2, bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.5" class="' + cls + (bad(v) ? ' ' + (cls === 'tr-sleepbar' ? 'poor' : 'short') : '') + '"/>';
-    });
-    return svg + axis(H) + hits(H) + '</svg>';
+  if (!n) return '';
+  const nights = list.map((x) => nightOf(x.d));
+  const all = T2.list.map((x) => nightOf(x.d));
+  const avg = (arr, k) => { const v = arr.map((x) => x[k]).filter((y) => typeof y === 'number'); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const recentN = all.slice(-7), usualN = all.slice(-35, -7);
+  const stat = (label, k, fmt, diffFmt) => {
+    const a = avg(recentN, k), u = avg(usualN, k);
+    let sub = 'last 7 nights';
+    if (a !== null && u !== null) sub = diffFmt(a - u);
+    return '<div class="tr-stat"><span>' + label + '</span><b>' + (a === null ? '–' : esc(fmt(a))) + '</b><small>' + esc(sub) + '</small></div>';
   };
-  // Bedtime: 21:00 at the top down to 08:00 at the bottom.
-  const bedChart = () => {
-    const H = 78, top = 6, base = H - 12, lo = 21 * 60, hi = 32 * 60;
-    const y = (m) => top + ((Math.min(Math.max(m, lo), hi) - lo) / (hi - lo)) * (base - top);
-    let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Bedtime per night">';
-    [[24 * 60, '00:00'], [27 * 60, '03:00'], [30 * 60, '06:00']].forEach(([m, t]) => {
-      svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(m).toFixed(1) + '" y2="' + y(m).toFixed(1) + '" class="tr-bedline"/><text x="' + (L - 4) + '" y="' + (y(m) + 3).toFixed(1) + '" class="tr-ax" text-anchor="end">' + t + '</text>';
-    });
-    list.forEach((d, i) => {
-      const m = bedMinutes(d.d.bt);
-      if (m === null) return;
-      svg += '<circle cx="' + (x(i) + bw / 2).toFixed(1) + '" cy="' + y(m).toFixed(1) + '" r="3" class="tr-beddot' + (m >= 27 * 60 ? ' late' : '') + '"/>';
-    });
-    return svg + axis(H) + hits(H) + '</svg>';
-  };
-  return '<h2 class="tr-h">Sleep</h2>' +
-    '<div class="tr-sub">Bedtime</div>' + bedChart() +
-    '<div class="tr-sub">Hours in bed</div>' + bars((d) => d.d.sl, 12, 'tr-hoursbar', (v) => v < 6, 'Hours in bed per night', ' h') +
-    '<div class="tr-sub">Sleep quality</div>' + bars((d) => d.d.q, 10, 'tr-sleepbar', (v) => v <= 5, 'Sleep quality per night', '/10') +
-    '<p class="small tr-hint">Tap (or hover over) a night for its details.</p>' + patBtn('sleep', 'Sleep patterns');
+  const minsWord = (dm) => { const m = Math.round(Math.abs(dm)); return m < 15 ? 'about usual' : (m >= 60 ? (m / 60).toFixed(1).replace('.0', '') + ' h' : m + ' min') + (dm > 0 ? ' later than usual' : ' earlier than usual'); };
+  const numWord = (unit, more, less) => (dv) => (Math.abs(dv) < 0.25 ? 'about usual' : Math.abs(dv).toFixed(1) + unit + ' ' + (dv > 0 ? more : less) + ' than usual');
+  let html = '<h2 class="tr-h">Sleep</h2><div class="tr-stats">' +
+    stat('Asleep', 'bed', clockText, minsWord) +
+    stat('Hours', 'hours', (v) => v.toFixed(1), numWord(' h', 'more', 'less')) +
+    stat('Quality', 'q', (v) => v.toFixed(1) + '/10', numWord('', 'higher', 'lower')) + '</div>';
+  // Chart: time runs down from 21:00 to 15:00 next day.
+  const W = 360, L = 34, R = 4, top = 4, H = 180, base = H - 16, lo = 21 * 60, hi = 39 * 60, bw = (W - L - R) / n;
+  const y = (m) => top + ((Math.min(Math.max(m, lo), hi) - lo) / (hi - lo)) * (base - top);
+  let svg = '<svg class="tr-chart sleep-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Sleep window per night, last six weeks">';
+  [[24 * 60, '00:00'], [27 * 60, '03:00'], [30 * 60, '06:00'], [33 * 60, '09:00'], [36 * 60, '12:00']].forEach(([m, t]) => {
+    svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(m).toFixed(1) + '" y2="' + y(m).toFixed(1) + '" class="tr-grid"/><text x="' + (L - 4) + '" y="' + (y(m) + 3).toFixed(1) + '" class="tr-ax" text-anchor="end">' + t + '</text>';
+  });
+  const uBed = avg(usualN.length >= 5 ? usualN : all, 'bed'), uWoke = avg(usualN.length >= 5 ? usualN : all, 'woke');
+  if (uBed !== null) svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(uBed).toFixed(1) + '" y2="' + y(uBed).toFixed(1) + '" class="sl-usual"/>';
+  if (uWoke !== null) svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(uWoke).toFixed(1) + '" y2="' + y(uWoke).toFixed(1) + '" class="sl-usual"/>';
+  const qCls = (q) => (q === null ? 'sl-qn' : q >= 7 ? 'sl-q3' : q > 5 ? 'sl-q2' : 'sl-q1');
+  nights.forEach((nt, i) => {
+    const x0 = L + i * bw + 1, w = Math.max(2, bw - 2);
+    if (nt.bed === null) return;
+    if (nt.woke === null) { svg += '<circle cx="' + (x0 + w / 2).toFixed(1) + '" cy="' + y(nt.bed).toFixed(1) + '" r="2.4" class="sl-dot ' + qCls(nt.q) + '"/>'; return; }
+    if (nt.up !== null) svg += '<rect x="' + x0.toFixed(1) + '" y="' + y(nt.woke).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + Math.max(1, y(nt.up) - y(nt.woke)).toFixed(1) + '" rx="1.5" class="sl-lie"/>';
+    svg += '<rect x="' + x0.toFixed(1) + '" y="' + y(nt.bed).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + Math.max(2, y(nt.woke) - y(nt.bed)).toFixed(1) + '" rx="1.5" class="sl-bar ' + qCls(nt.q) + '"/>';
+  });
+  // Week labels under each Monday.
+  list.forEach((x, i) => { if (keyToDate(x.key).getDay() === 1 && i < n - 3) svg += '<text x="' + (L + i * bw).toFixed(1) + '" y="' + (H - 3) + '" class="tr-ax">' + esc(shortDate(x.key)) + '</text>'; });
+  const tipOf = (x, nt) => [longDate(x.key), x.d.bt ? 'asleep ' + x.d.bt : '', x.d.wk ? 'woke ' + x.d.wk : '', x.d.up ? 'up ' + x.d.up : '',
+    nt.hours !== null ? nt.hours.toFixed(1) + ' h' : '', nt.q !== null ? 'quality ' + nt.q + '/10' : '', giNum(x.d.z) ? 'disturbed ' + x.d.z + '/5' : ''].filter(Boolean);
+  list.forEach((x, i) => { const t = tipOf(x, nights[i]); if (t.length > 1) svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + base + '" class="tr-hit" data-tip="' + esc(t.join(' · ')) + '"/>'; });
+  svg += '</svg>';
+  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-lie"></i>In bed, awake</span><span><i class="sl-k sl-uk"></i>Your usual</span></div>' +
+    '<p class="small tr-hint">Each bar is one night: from falling asleep (top) to waking (bottom). Usual = the 4 weeks before the last 7 nights. Tap a night for its details.</p>' + patBtn('sleep', 'Sleep patterns');
+  return html;
 }
 
 /* ---------- Medication history: pick a medicine, see every day it was logged (scrollable), and how long you've been on it ---------- */
