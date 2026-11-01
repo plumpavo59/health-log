@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v35 · 1 Nov';
+const APP_VERSION = 'v36 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -2733,7 +2733,7 @@ function nightOf(d) {
   let up = clockMin(d.up);
   if (up !== null && (woke === null || up < woke)) up = null;
   const hours = bed !== null && woke !== null ? (woke - bed) / 60 : giNum(d.sl) ? d.sl : null;
-  return { bed, woke, up, hours, q: giNum(d.q) ? d.q : null };
+  return { bed, woke, up, hours, q: giNum(d.q) ? d.q : null, z: giNum(d.z) ? d.z : null };
 }
 function sleepView(T2) {
   const list = T2.list.slice(-42), n = list.length;
@@ -2750,15 +2750,15 @@ function sleepView(T2) {
   };
   const minsWord = (dm) => { const m = Math.round(Math.abs(dm)); return m < 15 ? 'about usual' : (m >= 60 ? (m / 60).toFixed(1).replace('.0', '') + ' h' : m + ' min') + (dm > 0 ? ' later than usual' : ' earlier than usual'); };
   const numWord = (unit, more, less) => (dv) => (Math.abs(dv) < 0.25 ? 'about usual' : Math.abs(dv).toFixed(1) + unit + ' ' + (dv > 0 ? more : less) + ' than usual');
-  let html = '<h2 class="tr-h">Sleep</h2><div class="tr-stats">' +
-    stat('Asleep', 'bed', clockText, minsWord) +
-    stat('Hours', 'hours', (v) => v.toFixed(1), numWord(' h', 'more', 'less')) +
+  let html = '<h2 class="tr-h">Sleep</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
+    stat('Fell asleep', 'bed', clockText, minsWord) +
+    stat('Hours asleep', 'hours', (v) => v.toFixed(1), numWord(' h', 'more', 'less')) +
     stat('Quality', 'q', (v) => v.toFixed(1) + '/10', numWord('', 'higher', 'lower')) + '</div>';
-  // Chart: time runs down from 21:00 to 15:00 next day.
-  const W = 360, L = 34, R = 4, top = 4, H = 180, base = H - 16, lo = 21 * 60, hi = 39 * 60, bw = (W - L - R) / n;
-  const y = (m) => top + ((Math.min(Math.max(m, lo), hi) - lo) / (hi - lo)) * (base - top);
+  // Chart: time runs up from 22:00 (bottom) to 15:00 next day (top).
+  const W = 360, L = 34, R = 4, top = 4, H = 180, base = H - 16, lo = 22 * 60, hi = 39 * 60, bw = (W - L - R) / n;
+  const y = (m) => base - ((Math.min(Math.max(m, lo), hi) - lo) / (hi - lo)) * (base - top);
   let svg = '<svg class="tr-chart sleep-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Sleep window per night, last six weeks">';
-  [[24 * 60, '00:00'], [27 * 60, '03:00'], [30 * 60, '06:00'], [33 * 60, '09:00'], [36 * 60, '12:00']].forEach(([m, t]) => {
+  [[24 * 60, '00:00'], [27 * 60, '03:00'], [30 * 60, '06:00'], [33 * 60, '09:00'], [36 * 60, '12:00'], [39 * 60, '15:00']].forEach(([m, t]) => {
     svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(m).toFixed(1) + '" y2="' + y(m).toFixed(1) + '" class="tr-grid"/><text x="' + (L - 4) + '" y="' + (y(m) + 3).toFixed(1) + '" class="tr-ax" text-anchor="end">' + t + '</text>';
   });
   const uBed = avg(usualN.length >= 5 ? usualN : all, 'bed'), uWoke = avg(usualN.length >= 5 ? usualN : all, 'woke');
@@ -2769,8 +2769,12 @@ function sleepView(T2) {
     const x0 = L + i * bw + 1, w = Math.max(2, bw - 2);
     if (nt.bed === null) return;
     if (nt.woke === null) { svg += '<circle cx="' + (x0 + w / 2).toFixed(1) + '" cy="' + y(nt.bed).toFixed(1) + '" r="2.4" class="sl-dot ' + qCls(nt.q) + '"/>'; return; }
-    if (nt.up !== null) svg += '<rect x="' + x0.toFixed(1) + '" y="' + y(nt.woke).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + Math.max(1, y(nt.up) - y(nt.woke)).toFixed(1) + '" rx="1.5" class="sl-lie"/>';
-    svg += '<rect x="' + x0.toFixed(1) + '" y="' + y(nt.bed).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + Math.max(2, y(nt.woke) - y(nt.bed)).toFixed(1) + '" rx="1.5" class="sl-bar ' + qCls(nt.q) + '"/>';
+    if (nt.up !== null) svg += '<rect x="' + x0.toFixed(1) + '" y="' + y(nt.up).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + Math.max(1, y(nt.woke) - y(nt.up)).toFixed(1) + '" rx="1.5" class="sl-lie"/>';
+    const yTop = y(nt.woke), yBot = y(nt.bed), hgt = Math.max(2, yBot - yTop);
+    svg += '<rect x="' + x0.toFixed(1) + '" y="' + yTop.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hgt.toFixed(1) + '" rx="1.5" class="sl-bar ' + qCls(nt.q) + '"/>';
+    // Disturbed: one white tick per point (0–5), spread along the bar.
+    const z = Math.round(nt.z || 0);
+    for (let t = 1; t <= z; t++) { const ty = yTop + (hgt * t) / (z + 1); svg += '<line x1="' + x0.toFixed(1) + '" x2="' + (x0 + w).toFixed(1) + '" y1="' + ty.toFixed(1) + '" y2="' + ty.toFixed(1) + '" class="sl-tick"/>'; }
   });
   // Week labels under each Monday.
   list.forEach((x, i) => { if (keyToDate(x.key).getDay() === 1 && i < n - 3) svg += '<text x="' + (L + i * bw).toFixed(1) + '" y="' + (H - 3) + '" class="tr-ax">' + esc(shortDate(x.key)) + '</text>'; });
@@ -2778,8 +2782,8 @@ function sleepView(T2) {
     nt.hours !== null ? nt.hours.toFixed(1) + ' h' : '', nt.q !== null ? 'quality ' + nt.q + '/10' : '', giNum(x.d.z) ? 'disturbed ' + x.d.z + '/5' : ''].filter(Boolean);
   list.forEach((x, i) => { const t = tipOf(x, nights[i]); if (t.length > 1) svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + base + '" class="tr-hit" data-tip="' + esc(t.join(' · ')) + '"/>'; });
   svg += '</svg>';
-  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-lie"></i>In bed, awake</span><span><i class="sl-k sl-uk"></i>Your usual</span></div>' +
-    '<p class="small tr-hint">Each bar is one night: from falling asleep (top) to waking (bottom). Usual = the 4 weeks before the last 7 nights. Tap a night for its details.</p>' + patBtn('sleep', 'Sleep patterns');
+  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span><span><i class="sl-k sl-lie"></i>In bed, awake</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual</span></div>' +
+    '<p class="small tr-hint">Each bar is one night: from falling asleep (bottom) up to waking (top). Usual = the 4 weeks before the last 7 nights. Naps aren’t included yet. Tap a night for its details.</p>' + patBtn('sleep', 'Sleep patterns');
   return html;
 }
 
