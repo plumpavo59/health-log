@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v30 · 1 Nov';
+const APP_VERSION = 'v31 · 1 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -411,7 +411,7 @@ function stepWindow(st, today) {
   const winStart = settle ? addDays(st.from, settle) : st.from;
   return { start: winStart > end0 ? null : winStart, end: end0, settleEnd: settle ? addDays(st.from, settle - 1) : null, len };
 }
-function planHtml(today, withCompare) {
+function planHtml(today, withCompare, listInPopup) {
   const steps = planSteps();
   if (!steps.length) return '<p class="small">No plan found. It comes from the health tracker’s Meds tab (PLAN), via the receiver update HealthLog v13.</p>';
   const lastEnd = steps.reduce((m, x) => (x.to && x.to > m ? x.to : m), steps[0].from);
@@ -447,8 +447,10 @@ function planHtml(today, withCompare) {
       '<div class="ps-dates">' + esc(longDate(st.from)) + (st.to ? (st.to !== st.from ? ' – ' + esc(longDate(st.to)) : '') : ' onwards') + (st.length ? ' · ' + esc(st.length) : '') + prog + '</div>' +
       (st.change ? '<div class="ps-change">' + esc(st.change) + '</div>' : '') + (st.watch ? '<div class="ps-watch">Watch: ' + esc(st.watch) + '</div>' : '') + settling + '</div>';
   }).join('');
-  return svg + key + (cfg.plan.note ? '<p class="small">' + esc(cfg.plan.note) + '</p>' : '') + (withCompare ? patBtn('steps', 'Compare steps') : '') + '<div class="plan-list">' + list + '</div>' +
-    '<p class="small">From the health tracker’s Meds tab (PLAN). Proposed steps aren’t agreed yet.</p>';
+  const listHtml = '<div class="plan-list">' + list + '</div>' + '<p class="small">From the health tracker’s Meds tab (PLAN). Proposed steps aren’t agreed yet.</p>';
+  if (listInPopup === 'list') return (cfg.plan.note ? '<p class="small">' + esc(cfg.plan.note) + '</p>' : '') + listHtml;
+  if (listInPopup) return svg + key + patBtn('plan', 'Step details') + (withCompare ? patBtn('steps', 'Compare steps') : '');
+  return svg + key + (cfg.plan.note ? '<p class="small">' + esc(cfg.plan.note) + '</p>' : '') + (withCompare ? patBtn('steps', 'Compare steps') : '') + listHtml;
 }
 /* Compare steps: each step's judged days (last 7 of a long step) against the step before and the baseline. */
 function stepsCompare(T2, today) {
@@ -2108,6 +2110,8 @@ const TREND_SYMS = [
    Tested on 4–28 Oct: averaging pain, stiffness and fatigue hides single-symptom bad days (a fatigue day
    with pain lower than usual averages out), so a day is "worse" when any chosen symptom is well above its
    own usual, or the average is. Roughly 1 day in 5 comes out worse with these numbers. */
+// Compare steps is hidden until there are finished steps worth comparing; it reappears on its own from this date.
+const COMPARE_FROM = '2026-12-01';
 const USUAL_DAYS = 28, USUAL_MIN = 5, MIN_READINGS = 2;
 const SYM_WORSE = 1.0, SYM_MUCH = 2.0, AVG_WORSE = 0.5, AVG_MUCH = 1.25, AVG_BETTER = -0.75;
 const TR = { gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc', ['p', 's', 'f']), days: {} };
@@ -2311,12 +2315,12 @@ function trendsRender() {
   html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
   html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
-  html += momentsHealth(T2, today) + stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + planHtml(today, true) : '') + sleepView(T2);
+  html += momentsHealth(T2, today) + stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + planHtml(today, today >= COMPARE_FROM, true) : '') + sleepView(T2);
   html += '<p class="tr-foot">Day score = the average of that day’s readings for the symptoms you choose (days with ' + MIN_READINGS + '+ readings are coloured). Colours compare each day with your usual (the middle value of the ' + USUAL_DAYS + ' days before): worse means a chosen symptom was a point or more above its usual, or the average half a point. A ring marks a day much worse than usual; runs of those (with the worse days around them) show as flares. Days run 04:00 to 04:00.</p>' +
     fileLinks([['Health tracker', LINKS.healthSheet]]);
   if (TR.pop) {
     const G = giData();
-    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : null;
+    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : null;
     html += patternsPopup(pop);
     TR.popFresh = false;
   }
