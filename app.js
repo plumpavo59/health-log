@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v45 · 3 Nov';
+const APP_VERSION = 'v46 · 3 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -1044,7 +1044,7 @@ function logMoreRender() {
     more.dataset.built = '1';
     more.innerHTML = '<div class="tv"><div class="recent-buttons"><button id="toggle-medication" type="button" aria-expanded="false" aria-controls="medications">Recent meds</button>' +
       '<button id="toggle-log-inbox" type="button" aria-expanded="false" aria-controls="log-recent-logs">Recent inbox entries</button></div>' +
-      '<div id="medications" aria-live="polite" hidden></div><div id="log-recent-logs" aria-live="polite" hidden></div></div>' + fileLinks([['Health sheet', LINKS.healthSheet], ['Health GPT', LINKS.healthGpt]]);
+      '<div id="medications" aria-live="polite" hidden></div><div id="log-recent-logs" aria-live="polite" hidden></div></div>';
     $('toggle-log-inbox').onclick = () => {
       const open = $('log-recent-logs').hidden;
       $('log-recent-logs').hidden = !open;
@@ -1420,7 +1420,7 @@ function todayMarkup() {
       '<div id="inbox-queue" class="queue-note" hidden></div></section>' +
     '<section id="recent-section" class="lower-section"><div class="recent-buttons">' +
       '<button id="toggle-logs" type="button" aria-expanded="false" aria-controls="recent-logs">Recent inbox entries</button></div>' +
-      '<div id="recent-logs" aria-live="polite" hidden></div>' + fileLinks([['Life HQ sheet', LINKS.hqSheet]]) + '</section>' +
+      '<div id="recent-logs" aria-live="polite" hidden></div></section>' +
     '</div>';
 }
 
@@ -1923,7 +1923,7 @@ function loadOptionalWeek() {
     });
   }, 'Loading optional tasks…');
 }
-function moneyEnter() { pageEnter('money', 'Money', 'money-panel', fileLinks([['Finances sheet', LINKS.moneySheet], ['Finances GPT', LINKS.moneyGpt]]), loadMoney, 'moneyAt'); }
+function moneyEnter() { pageEnter('money', 'Money', 'money-panel', '', loadMoney, 'moneyAt'); }
 
 function loadNextFewDays() {
   const panel = $('next-days');
@@ -2499,7 +2499,7 @@ function trendsRender() {
   let html = secs.length > 1 ? '<nav class="tr-tabs" aria-label="Health sections">' + secs.map(([k, l]) => '<button type="button" data-tr="sec" data-v="' + k + '" aria-pressed="' + (sec === k) + '">' + l + '</button>').join('') + '</nav>' : '';
   html += sec === 'overall' ? over : sec === 'gut' ? stomachView(T2) : sec === 'sleep' ? sleepView(T2)
     : medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + trialEffectHtml(T2, today) + planHtml(today, today >= COMPARE_FROM, true) : '');
-  html += SHARE_ID ? '<p class="small tr-hint">View-only copy of Ru’s health log. It updates by itself.</p>' : fileLinks([['Health tracker', LINKS.healthSheet]]);
+  if (SHARE_ID) html += '<p class="small tr-hint">View-only copy of Ru’s health log. It updates by itself.</p>';
   if (TR.pop) {
     const G = giData();
     const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : TR.pop === 'trialfx' ? trialEffectPop(T2, today) : TR.pop === 'suppplan' ? suppPlanPop() : null;

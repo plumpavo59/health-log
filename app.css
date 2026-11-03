@@ -644,7 +644,7 @@ html.share-mode .eyebrow{visibility:hidden}
 .tr-h-sub{text-align:center;color:var(--muted);font-size:13px;margin:-6px 0 10px}
 .tr-sub-c{text-align:center}.tr-gichips{justify-content:center}
 @media (hover:hover){.hist-row:not(.head):hover,.ep-row:hover,.pt-btn:hover{outline:1.5px solid var(--ink);outline-offset:2px;border-radius:8px}
-.tr-cell[data-tr]:hover,.tr-hit:hover{outline:1.5px solid var(--ink);outline-offset:1px}}
+.tr-cell[data-tr]:hover{box-shadow:inset 0 0 0 2px var(--ink)}}
 .tr-tabs{position:sticky;top:0;z-index:6;display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:4px;padding:4px;margin:2px 0 14px;border-radius:14px;background:var(--soft);box-shadow:0 1px 0 var(--line3)}
 .tr-tabs button{min-height:40px;border:0;border-radius:10px;background:transparent;color:var(--muted2);font:inherit;font-size:14.5px;font-weight:550;padding:0 6px;white-space:nowrap}
 .tr-tabs button[aria-pressed=true]{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
