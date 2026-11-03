@@ -7,9 +7,13 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v39 · 3 Nov';
+const APP_VERSION = 'v40 · 3 Nov';
 const ROOT = document.documentElement;
-const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
+/* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
+   unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
+const SHARE_ID = (/[#&]share=([\w-]{20,120})/.exec(location.hash) || [])[1] || '';
+if (SHARE_ID) ROOT.classList.add('share-mode');
+const START = SHARE_ID ? 'trends' : ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
 const UNDO_MS = 5000;
 const GPT_URL = 'https://chatgpt.com/g/g-p-6abfbfcab4cc8191bff95054e150f72c/project';
@@ -30,9 +34,10 @@ const pad = (n) => String(n).padStart(2, '0');
 const hm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
 const dayKey = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 const LS = {
-  get(k, d) { try { const v = localStorage.getItem('hl.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem('hl.' + k, JSON.stringify(v)); } catch (e) {} },
-  del(k) { try { localStorage.removeItem('hl.' + k); } catch (e) {} }
+  // Share mode keeps its own storage, apart from Ru's own app on the same device.
+  get(k, d) { try { const v = localStorage.getItem((SHARE_ID ? 'hls.' : 'hl.') + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem((SHARE_ID ? 'hls.' : 'hl.') + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem((SHARE_ID ? 'hls.' : 'hl.') + k); } catch (e) {} }
 };
 
 /* Refresh buttons spin while their load runs (at least 600 ms so a quick load still shows). */
@@ -59,7 +64,11 @@ if (darkQuery) { try { darkQuery.addEventListener('change', applyTheme); } catch
 applyTheme();
 
 /* ================= connection ================= */
-const Conn = {
+const Conn = SHARE_ID ? {
+  endpoint: () => 'https://script.google.com/macros/s/' + SHARE_ID + '/exec',
+  token: () => '', key: () => '', paired: () => false,
+  canLog: () => !!LS.get('sharepw', '')
+} : {
   endpoint: () => LS.get('endpoint', ''),
   token: () => LS.get('token', ''),
   key: () => LS.get('key', ''),
@@ -77,6 +86,13 @@ async function rawPost(endpoint, body, ms) {
 }
 
 async function api(body) {
+  if (SHARE_ID) {
+    const pw = LS.get('sharepw', '');
+    if (!pw) throw new Error('No password');
+    const res = await rawPost(Conn.endpoint(), Object.assign({}, body, { share: pw }));
+    if (res && res.auth === false) { LS.del('sharepw'); SHR.error = res.error || 'That password didn’t work.'; if (view === 'trends') trendsRender(); }
+    return res;
+  }
   const endpoint = Conn.endpoint(), token = Conn.token(), key = Conn.key();
   if (!endpoint || !(token || key)) throw new Error('Not paired');
   const res = await rawPost(endpoint, Object.assign(token ? { token } : { key }, body));
@@ -115,7 +131,7 @@ function defaultDeviceName() {
 /* ================= views ================= */
 /* Tabs on this device (Settings): e.g. only Today and Ahead on the e-ink tablet. Hidden tabs never load. */
 const ALL_TABS = [['today', 'Today'], ['ahead', 'Ahead'], ['money', 'Money'], ['trends', 'Health'], ['log', 'Log']];
-const tabsOn = () => { const t = LS.get('tabs', null); const ok = Array.isArray(t) ? t.filter((x) => ALL_TABS.some(([k]) => k === x)) : []; return ok.length ? ok : ALL_TABS.map(([k]) => k); };
+const tabsOn = () => { if (SHARE_ID) return ['trends']; const t = LS.get('tabs', null); const ok = Array.isArray(t) ? t.filter((x) => ALL_TABS.some(([k]) => k === x)) : []; return ok.length ? ok : ALL_TABS.map(([k]) => k); };
 const tabOn = (v) => tabsOn().includes(v);
 function applyTabs() { document.querySelectorAll('#tabbar [data-tab]').forEach((b) => { b.hidden = !tabOn(b.dataset.tab); }); }
 let view = null, lastMainView = tabOn(START) ? START : tabsOn()[0];
@@ -195,6 +211,8 @@ function settingsRender() {
       '<div class="row2" style="margin-top:10px"><button type="button" class="seg" data-act="pair-open">' + (Conn.paired() ? 'Pair again' : 'Pair this device') + '</button>' +
       (Conn.paired() ? '<button type="button" class="seg" data-act="unpair">' + (unpairArmed ? 'Tap again to unpair' : 'Unpair') + '</button>' : '') + '</div></div>' +
     (Conn.paired() ? '<h2>PAIRED DEVICES</h2>' + devicesMarkup() : '') +
+    (Conn.paired() ? '<h2>SHARE THE HEALTH PAGE</h2><p class="small">A view-only copy of the Health tab for family or health professionals. Give each person this link and their own password from the health tracker’s <b>Sharing</b> tab (untick Active to stop someone’s access). The tab also shows when each person last looked and for how long. Needs HealthLog v16.</p>' +
+      '<div class="row2"><button type="button" class="seg" data-act="share-copy">Copy share link</button></div>' : '') +
     (Conn.paired() ? '<h2>DASHBOARD IDEAS</h2><textarea id="dash-note" class="text-input grow" rows="2" maxlength="2000" placeholder="A change you’d like in this app…" aria-label="Dashboard idea"></textarea>' +
       '<div class="row2" style="margin-top:8px"><button type="button" class="seg" data-act="dash-note">Send to the backlog</button></div><p class="small">Goes through the inbox as a “Dashboard:” note, then onto the dashboard backlog.</p>' : '') +
     '<h2>OTHER FILES</h2>' + fileLinks([['Works &amp; Royalties', LINKS.works], ['Inventory', LINKS.inventory], ['Life HQ sheet', LINKS.hqSheet]]) +
@@ -261,6 +279,12 @@ async function settingsAct(el) {
   const act = el.dataset.act, v = el.dataset.v;
   if (act === 'done') { unpairArmed = false; showView(lastMainView); }
   else if (act === 'theme') { setTheme(v); settingsRender(); }
+  else if (act === 'share-copy') {
+    const m = /\/macros\/s\/([\w-]+)\//.exec(Conn.endpoint() || '');
+    if (!m) { toast('Couldn’t work out the link. Pair this device first.'); return; }
+    const link = location.origin + location.pathname.replace(/[^/]*$/, '').replace(/today\/$/, '') + '#share=' + m[1];
+    try { await navigator.clipboard.writeText(link); toast('Share link copied.'); } catch (e) { window.prompt('Copy this link:', link); }
+  }
   else if (act === 'dash-note') {
     const box = $('dash-note'), text = box ? box.value.trim() : '';
     if (!text) { toast('Type the idea first.'); return; }
@@ -1113,10 +1137,11 @@ async function logFlush() {
 async function logRefreshConfig() {
   if (!Conn.canLog()) return;
   try {
-    const res = await api({ action: 'config' });
+    const res = await api(SHARE_ID ? { action: 'config', visit: !SHR.visitSent } : { action: 'config' });
+    if (SHARE_ID && res && res.success) SHR.visitSent = true;
     if (res && res.success) {
       cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds,
-        supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, suppPlan: res.suppPlan || null, clarity: !!res.clarity, today: res.today || FALLBACK.today };
+        supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, suppPlan: res.suppPlan || null, episodes: res.episodes || [], clarity: !!res.clarity, today: res.today || FALLBACK.today };
       if ($('medications') && !$('medications').hidden) renderRecentMeds();
       if (S.sheet && document.activeElement && /INPUT/.test(document.activeElement.tagName) && document.activeElement.closest('#sheet')) {
         LS.set('config', { data: cfg, day: dayKey(new Date()) });   // don't rebuild a sheet while typing in it
@@ -1302,9 +1327,14 @@ document.addEventListener('click', (ev) => {
 document.addEventListener('change', (ev) => {
   const t = ev.target;
   if (t && t.classList && t.classList.contains('time-overlay')) {
+    // v40: changing the hour or the date no longer closes the picker: the label updates in place and the
+    // page re-draws only when you leave the picker.
     const d = t.value ? new Date(t.value) : null;
-    if (d && !isNaN(d) && d.getTime() <= Date.now() + 10 * 60000 && d.getTime() >= Date.now() - 3 * 86400000) { S.time = d; S.timeOpen = false; logRender(); toast('Next entry will be logged at ' + hm(d)); }
-    else { toast('Pick a time in the last 3 days'); logRender(); }
+    if (d && !isNaN(d) && d.getTime() <= Date.now() + 10 * 60000 && d.getTime() >= Date.now() - 3 * 86400000) {
+      S.time = d; S.timeOpen = false; S.timeDirty = true;
+      const lab = t.closest('.time-pick');
+      if (lab) { lab.classList.add('set'); [...lab.childNodes].forEach((n) => { if (n.nodeType === 3) n.textContent = (dayKey(d) === dayKey(new Date()) ? '' : d.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(d); }); }
+    } else S.timeBad = true;
     return;
   }
   if (ev.target.id !== 'time-input') return;
@@ -1313,6 +1343,13 @@ document.addEventListener('change', (ev) => {
   else if (d) toast('Pick a time in the last 3 days');
 });
 
+document.addEventListener('focusout', (ev) => {
+  const t = ev.target;
+  if (!(t && t.classList && t.classList.contains('time-overlay'))) return;
+  // Re-draw a moment later, so a tap on Log straight after picking still lands.
+  if (S.timeDirty) { S.timeDirty = false; S.timeBad = false; toast('Next entry will be logged at ' + hm(S.time)); setTimeout(() => { if (!typingInLog()) logRender(); }, 350); }
+  else if (S.timeBad) { S.timeBad = false; toast('Pick a time in the last 3 days'); setTimeout(logRender, 350); }
+});
 document.addEventListener('input', (ev) => {
   const el = ev.target;
   if (!el.closest('#log-view')) return;
@@ -2207,6 +2244,37 @@ const TR = { gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null,
 const incSyms = () => TREND_SYMS.filter((x) => TR.inc.includes(x.k));
 const TRENDS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v16h16"/><path d="m7.5 14.5 3.5-4 3 2.5 5-6"/></svg>';
 
+/* Share mode: password screen and a light visit record (last opened, visits, minutes, taps). */
+const SHR = { error: '', visitSent: false, secs: 0, taps: 0, lastTick: Date.now() };
+function shareGateHtml() {
+  return '<form class="share-gate" id="share-gate" autocomplete="off"><p>This is a view-only copy of Ru’s health log. Enter the password Ru gave you.</p>' +
+    '<input type="password" id="share-pw" class="text-input" aria-label="Password" autocomplete="current-password" required minlength="8">' +
+    (SHR.error ? '<p class="share-err" role="alert">' + esc(SHR.error) + '</p>' : '') +
+    '<button type="submit" class="log wide">Open</button></form>';
+}
+if (SHARE_ID) {
+  document.title = 'Health log';
+  document.addEventListener('submit', (e) => {
+    if (e.target.id !== 'share-gate') return;
+    e.preventDefault();
+    const pw = ($('share-pw') || {}).value || '';
+    if (pw.length < 8) return;
+    LS.set('sharepw', pw); SHR.error = ''; SHR.visitSent = false; TR.at = 0; trendsRender(); trendsLoad();
+  });
+  document.addEventListener('click', () => { SHR.taps++; }, true);
+  const flush = (final) => {
+    const now = Date.now();
+    if (document.visibilityState === 'visible' || final) SHR.secs += Math.min(120, (now - SHR.lastTick) / 1000);
+    SHR.lastTick = now;
+    if (!LS.get('sharepw', '') || !SHR.visitSent || (SHR.secs < 5 && !SHR.taps)) return;
+    const body = JSON.stringify({ share: LS.get('sharepw', ''), action: 'seen', secs: Math.round(SHR.secs), taps: SHR.taps });
+    SHR.secs = 0; SHR.taps = 0;
+    try { fetch(Conn.endpoint(), { method: 'POST', body, keepalive: true, cache: 'no-store' }).catch(() => {}); } catch (e) {}
+  };
+  setInterval(() => flush(false), 60000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(true); else SHR.lastTick = Date.now(); });
+}
+
 function trendsEnter() {
   const el = $('trends-view');
   if (!el.dataset.built) {
@@ -2358,6 +2426,7 @@ document.addEventListener('click', (e) => { if (TR.tipEl && !(e.target.closest &
 function trendsRender() {
   const body = $('trends-body');
   if (!body) return;
+  if (SHARE_ID && !Conn.canLog()) { body.innerHTML = shareGateHtml(); return; }
   const T2 = trendsDays();
   if (!T2) {
     if (!Conn.canLog()) body.innerHTML = '<div class="notice">Pair this device once to see your health trends.<button type="button" class="log wide" data-tr="pair">Pair this device</button></div>';
@@ -2408,16 +2477,18 @@ function trendsRender() {
         (x.readings ? ' · ' + x.readings + (x.readings === 1 ? ' reading' : ' readings') : '') + (T2.means ? '' : ' · daily highs')
       : (x && x.flare ? 'part of a flare · ' : '') + (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>' + dayStrip(sel);
   } else dayHtml += '<p class="tr-detail muted">Tap a day for its scores and a 24-hour view.</p>';
+  if (sel) { const on = episodesOn(sel, today); if (on.length) dayHtml += '<p class="tr-detail ep-day">' + on.map((e) => '<span class="ep-tag">' + esc(e.text) + '</span>').join(' ') + '</p>'; }
+  dayHtml += episodesHtml(today);
 
   // v37: the symptom chart comes first, with a title; the day-by-day calendar follows.
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS);
   let html = '<h2 class="tr-h tr-h-first">Symptoms over time' + infoI('Overall = your day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Bars at the bottom = activity. Tap (or hover over) a day for its details.') + '</h2>';
   html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
-  html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
+  html += trendsChart(T2) + stressChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
   html += '<h2 class="tr-h">Day by day' + infoI('Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
   html += stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + trialEffectHtml(T2, today) + planHtml(today, today >= COMPARE_FROM, true) : '') + sleepView(T2);
-  html += fileLinks([['Health tracker', LINKS.healthSheet]]);
+  html += SHARE_ID ? '<p class="small tr-hint">View-only copy of Ru’s health log. It updates by itself.</p>' : fileLinks([['Health tracker', LINKS.healthSheet]]);
   if (TR.pop) {
     const G = giData();
     const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : TR.pop === 'trialfx' ? trialEffectPop(T2, today) : TR.pop === 'suppplan' ? suppPlanPop() : null;
@@ -2430,6 +2501,39 @@ function trendsRender() {
   restoreCalScroll(body);
 }
 
+/* v40: health episodes (colds, eczema flares …) from the Episodes tab, shown on each day and as a list. */
+function episodesOn(k, today) {
+  return (cfg.episodes || []).filter((e) => e.from <= k && (!e.to || k <= e.to) && k <= today).map((e) => {
+    const n = dayNum(e.from, k), len = e.to ? dayNum(e.from, e.to) : null;
+    return { e, text: e.name + ' · day ' + n + (len ? ' of ' + len : '') + (e.peak === k ? ' (peak)' : '') + (!e.to ? ' (ongoing)' : '') };
+  });
+}
+function episodesHtml(today) {
+  const eps = (cfg.episodes || []).filter((e) => !e.to || e.to >= addDays(today, -90)).sort((a, b) => (!a.to - !b.to) * -1 || (b.from > a.from ? 1 : -1));
+  const info = infoI('Spells that last days or weeks, like a cold or an eczema flare. They come from the health tracker’s Episodes tab; tell Claude or the inbox when one starts, peaks, changes or ends. Tap an episode for its notes; tap a day above to see which were going on.');
+  if (!eps.length) return '<h2 class="tr-h">Health episodes' + info + '</h2><p class="small tr-hint">None recorded yet.</p>';
+  return '<h2 class="tr-h">Health episodes' + info + '</h2><div class="ep-list">' + eps.map((e) => {
+    const len = dayNum(e.from, e.to || today);
+    return '<button type="button" class="ep-row' + (e.to ? '' : ' on') + '" data-tip="' + esc((e.notes || e.name) + (e.peak ? ' · peak ' + longDate(e.peak) : '')) + '"><i></i><span><b>' + esc(e.name) + '</b><small>' +
+      esc(shortDate(e.from) + (e.to ? ' – ' + shortDate(e.to) + ' · ' + len + ' days' : ' onwards · day ' + len)) + '</small></span><em>' + esc(e.status || (e.to ? 'Over' : 'Ongoing')) + '</em></button>';
+  }).join('') + '</div>';
+}
+/* v40: daily stress (0–5) as a small line under the symptom chart (HealthLog v16 sends it). */
+function stressChart(T2) {
+  const list = T2.list.slice(-42), n = list.length;
+  const get = (x) => (giNum(symVal(x.d, 'x')) ? symVal(x.d, 'x') : null);
+  if (!list.some((x) => get(x) !== null)) return '';
+  const W = 360, L = 22, R = 8, H = 58, TOP = 6, B = 14, ch = H - TOP - B;
+  const X = (i) => L + (n > 1 ? (i * (W - L - R)) / (n - 1) : 0), Y = (v) => TOP + ch - (v / 5) * ch;
+  let svg = '<div class="tr-sub">Stress (0–5)</div><svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Daily stress, last six weeks">';
+  [0, 5].forEach((v) => { svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" class="tr-grid"/><text x="' + (L - 5) + '" y="' + (Y(v) + 3.5) + '" class="tr-ax" text-anchor="end">' + v + '</text>'; });
+  let d = '', pen = false;  // joins across days without a reading
+  list.forEach((x, i) => { const v = get(x); if (v === null) return; d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); pen = true; });
+  svg += '<path d="' + d + '" fill="none" class="tr-stress"/>';
+  const colW = n > 1 ? (W - L - R) / (n - 1) : W;
+  list.forEach((x, i) => { const v = get(x); if (v === null) return; svg += '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.2" class="tr-stressdot"/><rect x="' + Math.max(L, X(i) - colW / 2).toFixed(1) + '" y="0" width="' + colW.toFixed(1) + '" height="' + (H - B) + '" class="tr-hit" data-tip="' + esc(longDate(x.key) + ' · stress ' + v + '/5') + '"/>'; });
+  return svg + '<text x="' + L + '" y="' + (H - 2) + '" class="tr-ax">' + esc(shortDate(list[0].key)) + '</text><text x="' + (W - R) + '" y="' + (H - 2) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(list[n - 1].key)) + '</text></svg>';
+}
 function trendsChart(T2) {
   const { marks } = T2;
   // Start the chart at the first logged day (at least the last 14 days) so empty weeks don't squash it.
@@ -2848,7 +2952,7 @@ function sleepView(T2) {
   const numWord = (unit, more, less) => (dv) => (Math.abs(dv) < 0.25 ? 'about usual' : Math.abs(dv).toFixed(1) + unit + ' ' + (dv > 0 ? more : less) + ' than usual');
   let html = '<h2 class="tr-h">Sleep' + infoI('Each bar is one night, from falling asleep (bottom) up to waking (top); the dashed part above is time in bed before getting up. Colour = sleep quality; grey = not rated. White lines = how disturbed (one per point out of 5). Dashed lines = your usual sleep and waking times (the 4 weeks before the last 7 nights). Naps aren’t included yet. Tap a night for its details.') + '</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
     stat('Fell asleep', 'bed', clockText, minsWord) +
-    stat('Hours asleep', 'hours', (v) => v.toFixed(1), numWord(' h', 'more', 'less')) +
+    stat('Hours asleep', 'hours', (v) => v.toFixed(1), (dv) => numWord(' h', 'more', 'less')(dv) + (T2.list.slice(-7).some((x) => x.d.np) ? ' · nights only, a nap not counted' : '')) +
     stat('Quality', 'q', (v) => v.toFixed(1) + '/10', numWord('', 'higher', 'lower')) + '</div>';
   // Chart: time runs up from 22:00 (bottom) to 15:00 next day (top).
   const W = 360, L = 34, R = 4, top = 4, H = 180, base = H - 16, lo = 22 * 60, hi = 39 * 60, bw = (W - L - R) / n;
@@ -2872,13 +2976,15 @@ function sleepView(T2) {
     const z = Math.round(nt.z || 0);
     for (let t = 1; t <= z; t++) { const ty = yTop + (hgt * t) / (z + 1); svg += '<line x1="' + x0.toFixed(1) + '" x2="' + (x0 + w).toFixed(1) + '" y1="' + ty.toFixed(1) + '" y2="' + ty.toFixed(1) + '" class="sl-tick"/>'; }
   });
+  // v40: a nap that day may make the night look short: ring above the bar (HealthLog v16 reads naps from notes).
+  list.forEach((x, i) => { if (x.d.np) svg += '<circle cx="' + (L + i * bw + bw / 2).toFixed(1) + '" cy="' + (top + 4) + '" r="3" class="sl-nap"/>'; });
   // Week labels under each Monday.
   list.forEach((x, i) => { if (keyToDate(x.key).getDay() === 1 && i < n - 3) svg += '<text x="' + (L + i * bw).toFixed(1) + '" y="' + (H - 3) + '" class="tr-ax">' + esc(shortDate(x.key)) + '</text>'; });
   const tipOf = (x, nt) => [longDate(x.key), x.d.bt ? 'asleep ' + x.d.bt : '', x.d.wk ? 'woke ' + x.d.wk : '', x.d.up ? 'up ' + x.d.up : '',
-    nt.hours !== null ? nt.hours.toFixed(1) + ' h' : '', nt.q !== null ? 'quality ' + nt.q + '/10' : '', giNum(x.d.z) ? 'disturbed ' + x.d.z + '/5' : ''].filter(Boolean);
+    nt.hours !== null ? nt.hours.toFixed(1) + ' h' : '', nt.q !== null ? 'quality ' + nt.q + '/10' : '', giNum(x.d.z) ? 'disturbed ' + x.d.z + '/5' : '', x.d.np ? 'nap that day' + (x.d.np > 0 ? ' (~' + x.d.np + ' h)' : '') + ': the night alone may look short' : ''].filter(Boolean);
   list.forEach((x, i) => { const t = tipOf(x, nights[i]); if (t.length > 1) svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + base + '" class="tr-hit" data-tip="' + esc(t.join(' · ')) + '"/>'; });
   svg += '</svg>';
-  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span><span><i class="sl-k sl-lie"></i>In bed, awake</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual</span></div>' +
+  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span>' + (list.some((x) => x.d.np) ? '<span><i class="sl-k sl-napk"></i>Nap that day</span>' : '') + '<span><i class="sl-k sl-lie"></i>In bed, awake</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual</span></div>' +
     '' + patBtn('sleep', 'Sleep patterns');
   return html;
 }
