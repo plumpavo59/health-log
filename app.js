@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v41 · 3 Nov';
+const APP_VERSION = 'v42 · 3 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -134,7 +134,9 @@ const ALL_TABS = [['today', 'Today'], ['ahead', 'Ahead'], ['money', 'Money'], ['
 const tabsOn = () => { if (SHARE_ID) return ['trends']; const t = LS.get('tabs', null); const ok = Array.isArray(t) ? t.filter((x) => ALL_TABS.some(([k]) => k === x)) : []; return ok.length ? ok : ALL_TABS.map(([k]) => k); };
 const tabOn = (v) => tabsOn().includes(v);
 function applyTabs() { document.querySelectorAll('#tabbar [data-tab]').forEach((b) => { b.hidden = !tabOn(b.dataset.tab); }); }
-let view = null, lastMainView = tabOn(START) ? START : tabsOn()[0];
+// v42: each device can choose the tab it opens on (Settings › Opens on); otherwise the icon's own start tab.
+const openTab = () => { const p = SHARE_ID ? null : LS.get('start', null); return p && tabOn(p) ? p : tabOn(START) ? START : tabsOn()[0]; };
+let view = null, lastMainView = openTab();
 function showView(v) {
   if (v !== 'settings' && !tabOn(v)) v = tabsOn()[0];
   view = v;
@@ -207,6 +209,8 @@ function settingsRender() {
     '<h2>TABS ON THIS DEVICE</h2><div class="chips" role="group" aria-label="Tabs on this device">' + ALL_TABS.map(([k, l]) =>
       '<button type="button" class="chip" data-act="tab-toggle" data-v="' + k + '" aria-pressed="' + tabOn(k) + '"><b>' + l + '</b></button>').join('') + '</div>' +
       '<p class="small">Hidden tabs don’t load at all, so a slow device (like the e-ink tablet) stays quick. Only this device changes.</p>' +
+    '<h2>OPENS ON</h2><div class="chips" role="group" aria-label="Tab this device opens on">' + ALL_TABS.filter(([k]) => tabOn(k)).map(([k, l]) =>
+      '<button type="button" class="chip" data-act="start-tab" data-v="' + k + '" aria-pressed="' + (openTab() === k) + '"><b>' + l + '</b></button>').join('') + '</div>' +
     '<h2>THIS DEVICE</h2><div class="notice">' + state +
       '<div class="row2" style="margin-top:10px"><button type="button" class="seg" data-act="pair-open">' + (Conn.paired() ? 'Pair again' : 'Pair this device') + '</button>' +
       (Conn.paired() ? '<button type="button" class="seg" data-act="unpair">' + (unpairArmed ? 'Tap again to unpair' : 'Unpair') + '</button>' : '') + '</div></div>' +
@@ -279,6 +283,7 @@ async function settingsAct(el) {
   const act = el.dataset.act, v = el.dataset.v;
   if (act === 'done') { unpairArmed = false; showView(lastMainView); }
   else if (act === 'theme') { setTheme(v); settingsRender(); }
+  else if (act === 'start-tab') { LS.set('start', v); settingsRender(); toast('This device will open on ' + (ALL_TABS.find(([k]) => k === v) || [, v])[1] + '.'); }
   else if (act === 'share-copy') {
     const m = /\/macros\/s\/([\w-]+)\//.exec(Conn.endpoint() || '');
     if (!m) { toast('Couldn’t work out the link. Pair this device first.'); return; }
@@ -3111,7 +3116,7 @@ setInterval(() => {
 }, 60000);
 
 applyTabs();
-showView(tabOn(START) ? START : tabsOn()[0]);
+showView(openTab());
 if (Conn.canLog() && (tabOn('log') || tabOn('trends'))) { logFlush(); logRefreshConfig(); }
 
 if ('serviceWorker' in navigator) {
