@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v38 · 1 Nov';
+const APP_VERSION = 'v39 · 3 Nov';
 const ROOT = document.documentElement;
 const START = ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
@@ -195,6 +195,8 @@ function settingsRender() {
       '<div class="row2" style="margin-top:10px"><button type="button" class="seg" data-act="pair-open">' + (Conn.paired() ? 'Pair again' : 'Pair this device') + '</button>' +
       (Conn.paired() ? '<button type="button" class="seg" data-act="unpair">' + (unpairArmed ? 'Tap again to unpair' : 'Unpair') + '</button>' : '') + '</div></div>' +
     (Conn.paired() ? '<h2>PAIRED DEVICES</h2>' + devicesMarkup() : '') +
+    (Conn.paired() ? '<h2>DASHBOARD IDEAS</h2><textarea id="dash-note" class="text-input grow" rows="2" maxlength="2000" placeholder="A change you’d like in this app…" aria-label="Dashboard idea"></textarea>' +
+      '<div class="row2" style="margin-top:8px"><button type="button" class="seg" data-act="dash-note">Send to the backlog</button></div><p class="small">Goes through the inbox as a “Dashboard:” note, then onto the dashboard backlog.</p>' : '') +
     '<h2>OTHER FILES</h2>' + fileLinks([['Works &amp; Royalties', LINKS.works], ['Inventory', LINKS.inventory], ['Life HQ sheet', LINKS.hqSheet]]) +
     '<h2>ABOUT</h2><p class="small">Life HQ app ' + esc(APP_VERSION) + '. Each device is paired on its own. Pages show saved copies instantly, then refresh. Health records go straight to your health tracker.</p>' +
     '<div class="row2"><button type="button" class="seg" data-act="update">Check for update</button><button type="button" class="seg" id="test-celebration" data-act="celebrate">Test celebration</button></div>';
@@ -259,6 +261,12 @@ async function settingsAct(el) {
   const act = el.dataset.act, v = el.dataset.v;
   if (act === 'done') { unpairArmed = false; showView(lastMainView); }
   else if (act === 'theme') { setTheme(v); settingsRender(); }
+  else if (act === 'dash-note') {
+    const box = $('dash-note'), text = box ? box.value.trim() : '';
+    if (!text) { toast('Type the idea first.'); return; }
+    queueInbox((/^dashboard:/i.test(text) ? '' : 'Dashboard: ') + text, 'settings');
+    box.value = ''; autoGrow(box); toast('Sent to the dashboard backlog.');
+  }
   else if (act === 'tab-toggle') {
     const on = tabsOn();
     const next = on.includes(v) ? on.filter((x) => x !== v) : ALL_TABS.map(([k]) => k).filter((k) => on.includes(k) || k === v);
@@ -481,6 +489,18 @@ function trialEffectPop(T2, today) {
   return { title: 'Since ' + e.st.label.replace(/^\d+\s*·\s*/, '') + ' started', comps: e.rows.map((r) => { const w = effWord(r); return { title: r.name, left: { label: '4 weeks before', value: r.a.toFixed(1) }, right: { label: 'Since ' + shortDate(e.start), value: r.b.toFixed(1) }, verdict: w.text.charAt(0).toUpperCase() + w.text.slice(1), tone: w.tone }; }),
     note: 'Daily averages of your readings: ' + shortDate(addDays(e.start, -28)) + ' – ' + shortDate(addDays(e.start, -1)) + ' against ' + shortDate(e.start) + ' – today. Higher is better for mental clarity, mood and sleep quality; lower is better for the rest. Changes under 0.4 count as the same. Other things change too (sleep, activity, stress), so this shows what happened, not what caused it.' };
 }
+/* v39: the supplement plan from the Meds tab (HealthLog v15e), or just the app's list on older receivers. */
+function suppPlanPop() {
+  const sp = cfg.suppPlan;
+  const rows = sp && sp.rows ? sp.rows : suppList().map((x) => ({ name: x.name, product: x.detail, def: x.def, status: '', when: '', advice: '' }));
+  const h = rows.map((r) => '<div class="sp-row"><div class="sp-top"><b>' + esc(r.name) + '</b>' + (r.status ? '<span class="ps-chip">' + esc(r.status) + '</span>' : '') + '</div>' +
+    (r.product ? '<div class="sp-line">' + esc(r.product) + '</div>' : '<div class="sp-line muted">No product set</div>') +
+    (r.when ? '<div class="sp-line"><span>When</span> ' + esc(r.when) + '</div>' : '') +
+    (r.advice ? '<div class="sp-line"><span>Plan</span> ' + esc(r.advice) + '</div>' : '') +
+    '<div class="sp-line small">' + (r.def ? 'Ticked by default in the app' : 'Not ticked by default') + '</div></div>').join('');
+  return { title: 'Supplements', html: h + (sp && sp.notes ? sp.notes.map((t) => '<p class="small">' + esc(t) + '</p>').join('') : '') +
+    '<p class="small">From the health tracker’s Meds tab (SUPPLEMENTS · PLAN). Change products, plan and defaults there.' + (sp ? '' : ' Plan details need the receiver update HealthLog v15e.') + '</p>' };
+}
 /* Compare steps: each step's judged days (last 7 of a long step) against the step before and the baseline. */
 function stepsCompare(T2, today) {
   const G = giData();
@@ -620,12 +640,13 @@ function checkinView() {
       list.map(([k, l, max]) => {
         const v = S.scores[k];
         const set = v !== undefined;
-        return '<div class="scale"><label for="r-' + k + '">' + l + '</label>' +
+        // v39: sleep times sit straight under the sleep sliders (or first, when there are none).
+        const times = period === 'Wake' && (k === 'disturb' || (k === list[0][0] && !list.some((x) => x[0] === 'disturb'))) ? sleepTimesHtml() : '';
+        const slider = '<div class="scale"><label for="r-' + k + '">' + l + '</label>' +
           '<input id="r-' + k + '" type="range" min="0" max="' + max + '" step="0.5" value="' + (set ? v : max / 2) + '" data-score="' + k + '"' + (set ? '' : ' class="unset"') + '>' +
           '<output id="o-' + k + '" for="r-' + k + '"' + (set ? '' : ' class="unset"') + '>' + (set ? v : '–') + '</output></div>';
+        return k === 'disturb' ? slider + times : times + slider;
       }).join('') + '</div>' +
-      (period === 'Wake' ? '<div class="sleep-times" role="group" aria-label="Sleep times">' + [['bed', 'Went to sleep'], ['wake', 'Woke'], ['up', 'Got up']].map(([k, l]) =>
-        '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') + '</div>' : '') +
       momentsView() +
       '<input type="text" data-field="checkNote" value="' + esc(S.checkNote) + '" placeholder="Note (optional)" aria-label="Check-in note" autocomplete="off">' +
       '<button type="button" class="log wide" id="check-save" data-act="checkin"></button></div>';
@@ -633,6 +654,10 @@ function checkinView() {
   return html + '</section>';
 }
 
+function sleepTimesHtml() {
+  return '<div class="sleep-times" role="group" aria-label="Sleep times">' + [['bed', 'Went to sleep'], ['wake', 'Woke'], ['up', 'Got up']].map(([k, l]) =>
+    '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') + '</div>';
+}
 /* Typing guard: background refreshes (saving, config, the 60 s tick) wait until you leave the text box,
    so the box doesn't lose focus mid-word. Taps you make still re-render straight away, keeping your place. */
 function typingInLog() {
@@ -718,7 +743,7 @@ function missingRows() {
     }).filter(Boolean);
 }
 /* Moments: notable tiredness or weakness, one tap (tracking from 29 Oct 2026). Kept out of day averages. */
-const MOMENTS = ['Tired', 'Very tired', 'Weak'];
+const MOMENTS = ['Tired', 'Very tired', 'Weak', 'Gassy'];  // Gassy needs HealthLog v15e
 const MOMENTS_SINCE = '2026-10-29';
 function momentsView() {
   const today = todayEntries().filter((r) => r.kind === 'moment');
@@ -743,10 +768,23 @@ function todayEntries() {
 /* ---------- Log page: one-line inbox (same queue and sender as Today's inbox) ---------- */
 function logInboxView() {
   if (!Conn.paired()) return '';
-  return '<form id="log-inbox-form" class="mini-inbox" autocomplete="off"><input type="text" id="log-inbox-text" data-field="inboxText" value="' + esc(S.inboxText) +
-    '" placeholder="Add to inbox…" aria-label="Add to inbox" enterkeyhint="send" maxlength="2000"><button type="submit" class="log">Send</button></form>' +
+  return '<form id="log-inbox-form" class="mini-inbox" autocomplete="off"><textarea id="log-inbox-text" class="grow" rows="1" data-field="inboxText" placeholder="Add to inbox…" aria-label="Add to inbox" maxlength="2000">' + esc(S.inboxText) +
+    '</textarea><button type="submit" class="log">Send</button></form>' +
     '<div id="log-inbox-status" class="mini-status" role="status" aria-live="polite">' + esc(S.inboxStatus || (inboxQueue.length ? 'Waiting to send (' + inboxQueue.length + ')' : '')) + '</div>';
 }
+/* v39: text boxes marked "grow" (and Today's inbox) get taller as you type, up to half the screen. */
+function autoGrow(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight + 2, Math.round(window.innerHeight * 0.5)) + 'px';
+}
+document.addEventListener('input', (e) => { const t = e.target; if (t && (t.id === 'log-text' || (t.classList && t.classList.contains('grow')))) autoGrow(t); });
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (!t || t.id !== 'log-inbox-text' || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+  if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  e.preventDefault(); logInboxSubmit();
+});
 function setLogInboxStatus(text, clearAfter) {
   S.inboxStatus = text;
   const el = $('log-inbox-status'); if (el) el.textContent = text;
@@ -757,7 +795,7 @@ function logInboxSubmit() {
   if (!text) return;
   queueInbox(text, 'log');
   S.inboxText = '';
-  const el = $('log-inbox-text'); if (el) el.value = '';
+  const el = $('log-inbox-text'); if (el) { el.value = ''; autoGrow(el); }
   setLogInboxStatus(navigator.onLine ? 'Sending…' : 'Waiting to send');
   inboxFlush(true);
 }
@@ -808,11 +846,17 @@ function sheetView() {
     const n = S.meds.length + (S.suppOn && S.supps.length ? 1 : 0);
     btn = '<button type="button" class="log" data-act="meds"' + (n ? '' : ' disabled') + '>' + (n ? 'Log ' + n : 'Log') + '</button>';
     const suppChip = sup.length ? '<button type="button" class="chip med" data-act="supp-toggle" aria-pressed="' + S.suppOn + '"><small class="dose-top">' + sup.length + ' to choose</small><span class="med-name"><b>Supplements</b>' + (suppDoneToday() ? '<span class="taken" aria-label="logged today">✓</span>' : '') + '</span></button>' : '';
-    let suppPlaced = false;
-    body = '<div class="chips">' + (cfg.meds || []).map((m) => {
-      const pre = !suppPlaced && Number(m.perDay) === 0 ? (suppPlaced = true, suppChip) : '';
-      return pre + '<button type="button" class="chip med" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><small class="dose-top">' + esc(chipDoseTop(m)) + '</small><span class="med-name"><b>' + esc(m.name) + '</b>' + takenMark(m) + '</span></button>';
-    }).join('') + (suppPlaced ? '' : suppChip) +
+    // v39: what's still to take today comes first, then what's done, then the as-needed ones.
+    const chip = (m) => '<button type="button" class="chip med" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><small class="dose-top">' + esc(chipDoseTop(m)) + '</small><span class="med-name"><b>' + esc(m.name) + '</b>' + takenMark(m) + '</span></button>';
+    const all = cfg.meds || [], hk = healthKey(new Date());
+    const nToday = (m) => (((cfg.today || {}).meds || {})[m.name] || 0) + recent.filter((r) => r.kind === 'meds' && r.hday === hk && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)).length;
+    const routine = all.filter((m) => Number(m.perDay) !== 0), asNeededMeds = all.filter((m) => Number(m.perDay) === 0);
+    const due = routine.filter((m) => nToday(m) < (m.perDay || 1)), done = routine.filter((m) => nToday(m) >= (m.perDay || 1));
+    const suppDone = suppDoneToday();
+    const head = (t) => '<span class="chip-h">' + t + '</span>';
+    const dueHtml = due.map(chip).join('') + (suppDone ? '' : suppChip), doneHtml = done.map(chip).join('') + (suppDone ? suppChip : '');
+    body = '<div class="chips med-groups">' + (dueHtml ? head('Still to take today') + dueHtml : '') + (doneHtml ? head('Done today') + doneHtml : '') +
+      (asNeededMeds.length ? head('As needed') + asNeededMeds.map(chip).join('') : '') +
       '<button type="button" class="chip other" data-act="other-med">Other…</button></div>' + doseRows() + suppRow() + historyView();
   } else if (S.sheet === 'bowel') {
     btn = '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button>';
@@ -833,7 +877,8 @@ function sheetView() {
     const chips = (act, list, cur, fmt) => '<div class="chips">' + list.map((x) => '<button type="button" class="chip food" data-act="' + act + '" data-v="' + esc(x) + '" aria-pressed="' + (cur === x) + '">' + esc(fmt ? fmt(x) : x) + '</button>').join('') + '</div>';
     body = '<input type="text" id="act-input" data-field="actText" value="' + esc(S.actText) + '" placeholder="What did you do?" aria-label="What did you do" autocomplete="off" enterkeyhint="send">' +
       '<div class="opt-h">Type</div>' + chips('act-type', ACT_TYPES, S.actType) +
-      '<div class="opt-h">Minutes</div>' + chips('act-min', ACT_MINS.map(String), S.actMin === null ? null : String(S.actMin), (x) => (x === '120' ? '120+' : x)) +
+      '<div class="opt-h">Minutes</div>' + chips('act-min', ACT_MINS.map(String), S.actMin === null ? null : String(S.actMin), (x) => (x === '120' ? '120+' : x)).replace(/<\/div>$/, '') +
+        '<input type="number" inputmode="numeric" min="1" max="600" id="act-min-custom" class="min-custom" placeholder="Other" aria-label="Other number of minutes" value="' + esc(S.actMinText || (S.actMin && !ACT_MINS.includes(S.actMin) ? String(S.actMin) : '')) + '"></div>' +
       '<div class="opt-h">Effort</div><div class="grid3" role="group" aria-label="Effort">' + ACT_EFFORT.map((e) => '<button type="button" class="seg" data-act="act-effort" data-v="' + e + '" aria-pressed="' + (S.actEffort === e) + '">' + e + '</button>').join('') + '</div>' +
       '<p class="small" id="act-hint">' + actHint() + '</p>';
   }
@@ -870,6 +915,9 @@ function openSheet(kind) {
 function closeSheet() {
   if (!S.sheet) return;
   S.sheet = null;
+  // v39: closing a window drops whatever was selected in it (typed text is kept).
+  S.meds = []; S.doses = {}; S.suppOn = false; S.supps = []; S.bristol = null; S.size = null; S.urgent = false;
+  S.actType = null; S.actMin = null; S.actEffort = null; S.actMinText = ''; S.moment = null;
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   logRender();
 }
@@ -1068,7 +1116,7 @@ async function logRefreshConfig() {
     const res = await api({ action: 'config' });
     if (res && res.success) {
       cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds,
-        supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, clarity: !!res.clarity, today: res.today || FALLBACK.today };
+        supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, suppPlan: res.suppPlan || null, clarity: !!res.clarity, today: res.today || FALLBACK.today };
       if ($('medications') && !$('medications').hidden) renderRecentMeds();
       if (S.sheet && document.activeElement && /INPUT/.test(document.activeElement.tagName) && document.activeElement.closest('#sheet')) {
         LS.set('config', { data: cfg, day: dayKey(new Date()) });   // don't rebuild a sheet while typing in it
@@ -1117,7 +1165,7 @@ function logAct(el) {
     return;
   }
   if (act === 'act-type') { S.actType = S.actType === v ? null : v; logRender(); return; }
-  if (act === 'act-min') { S.actMin = S.actMin === Number(v) ? null : Number(v); logRender(); return; }
+  if (act === 'act-min') { S.actMin = S.actMin === Number(v) ? null : Number(v); S.actMinText = ''; logRender(); return; }
   if (act === 'act-effort') { S.actEffort = S.actEffort === v ? null : v; logRender(); return; }
   if (act === 'activity') {
     const route = actRoute();
@@ -1277,6 +1325,13 @@ document.addEventListener('input', (ev) => {
   } else if (el.dataset.sleep) {
     S.sleepT[el.dataset.sleep] = el.value;
     updateCheckButton();
+  } else if (el.id === 'act-min-custom') {
+    // v39: any number of minutes (1–600) instead of the chips.
+    S.actMinText = el.value;
+    const n = Math.round(Number(el.value));
+    S.actMin = n >= 1 && n <= 600 ? n : null;
+    document.querySelectorAll('#sheet [data-act="act-min"]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+    updateActButton(); const h = $('act-hint'); if (h) h.textContent = actHint();
   } else if (el.dataset.field) {
     S[el.dataset.field] = el.value;
     if (el.dataset.field === 'food') { const b = $('food-log'); if (b) b.disabled = !el.value.trim(); }
@@ -2365,7 +2420,7 @@ function trendsRender() {
   html += fileLinks([['Health tracker', LINKS.healthSheet]]);
   if (TR.pop) {
     const G = giData();
-    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : TR.pop === 'trialfx' ? trialEffectPop(T2, today) : null;
+    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : TR.pop === 'trialfx' ? trialEffectPop(T2, today) : TR.pop === 'suppplan' ? suppPlanPop() : null;
     html += patternsPopup(pop);
     TR.popFresh = false;
   }
@@ -2839,7 +2894,7 @@ function medsView(today) {
   const taken = Object.keys(d.byDay).filter((k) => d.byDay[k] > 0 && k <= today).sort();
   const firstKey = taken[0] || today;
   // v34: the Log tab's 14-day rows; tap one to open its full calendar below.
-  let html = '<h2 class="tr-h">Medication</h2><div class="tr-medhist">' + historyView('health') + '</div>';
+  let html = '<h2 class="tr-h">Medication</h2><div class="tr-medhist">' + historyView('health') + '</div>' + ((cfg.suppPlan || suppList().length) ? patBtn('suppplan', 'Supplements: products and plan') : '');
   if (!TR.medOpen || !data[TR.medOpen]) return html + '<p class="small tr-hint">Tap a medicine for its full calendar.</p>';
   html += '<div class="tr-medsel"><b>' + esc(cur) + '</b></div>';
   html += calGrid('med-' + cur, cur + ' calendar', firstKey, today, (k) => {

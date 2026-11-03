@@ -420,7 +420,9 @@ input[type=range].unset::-moz-range-thumb{background:var(--card);border:2px soli
 
 /* v16: Log page — one-line inbox, check-in row with Flare, quick-log buttons, bottom sheets */
 .mini-inbox{display:flex;gap:8px;align-items:center}
-.mini-inbox input{flex:1;min-width:0}
+.mini-inbox input,.mini-inbox textarea{flex:1;min-width:0}
+.mini-inbox{align-items:flex-end}
+.mini-inbox textarea{font:inherit;font-size:16px;color:inherit;min-height:46px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);resize:none;line-height:1.35;overflow-y:auto}
 .mini-inbox .log{min-height:46px;flex:none}
 .mini-status{font-size:13px;color:var(--muted);margin-top:-6px;min-height:0}
 .mini-status:empty{display:none}
@@ -617,3 +619,12 @@ html,body{overscroll-behavior-y:none}
 .info-i:hover{color:var(--ink);border-color:var(--muted2)}
 .tr-h-first{margin-top:4px}
 .eff-better{color:#2f8a4c}.eff-worse{color:#c8463f}
+textarea.grow{resize:none;overflow-y:auto}
+#log-text{overflow-y:auto}
+.chips .chip-h{flex-basis:100%;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted2);margin:6px 0 -2px;text-align:center}
+.chips .chip-h:first-child{margin-top:0}
+.min-custom{width:84px;min-height:40px;font:inherit;font-size:16px;color:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:999px;background:var(--card);text-align:center}
+.sp-row{padding:10px 0;border-bottom:1px solid var(--line3)}
+.sp-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px}
+.sp-line{font-size:14px;line-height:1.4;margin-top:2px}
+.sp-line span{color:var(--muted2);font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin-right:4px}
