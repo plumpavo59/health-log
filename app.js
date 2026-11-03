@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v46 · 3 Nov';
+const APP_VERSION = 'v47 · 3 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -16,6 +16,8 @@ if (SHARE_ID) ROOT.classList.add('share-mode');
 const START = SHARE_ID ? 'trends' : ROOT.dataset.start === 'today' ? 'today' : 'log';
 const BASE = ROOT.dataset.base || './';
 const UNDO_MS = 5000;
+// v47: the Life HQ GPT button (top right of Today) is switched off; set to true to bring it back.
+const SHOW_GPT_BUTTON = false;
 const GPT_URL = 'https://chatgpt.com/g/g-p-6abfbfcab4cc8191bff95054e150f72c/project';
 const LINKS = {
   hqSheet: 'https://docs.google.com/spreadsheets/d/1apxgN6nt1-eRLEs4FPoLxlz_jCRTNHENTv1BKb0A3Ss/edit',
@@ -1392,9 +1394,9 @@ const GPT_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"
 const REFRESH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>';
 
 function todayMarkup() {
-  return '<div class="top"><span class="eyebrow">LIFE DASHBOARD</span><div class="top-actions">' +
+  return '<div class="top"><span class="eyebrow">LIFE HQ</span><div class="top-actions">' +
       '<a class="icon-btn" href="https://app.todoist.com/app/today" target="_blank" rel="noopener" aria-label="Open Todoist">' + TODOIST_SVG + '</a>' +
-      '<a class="icon-btn" href="' + GPT_URL + '" target="_blank" rel="noopener" aria-label="Open Life HQ GPT">' + GPT_SVG + '</a>' +
+      (SHOW_GPT_BUTTON ? '<a class="icon-btn" href="' + GPT_URL + '" target="_blank" rel="noopener" aria-label="Open Life HQ GPT">' + GPT_SVG + '</a>' : '') +
       '<button type="button" class="icon-btn" id="refresh" aria-label="Refresh">' + REFRESH_SVG + '</button>' +
       '<button type="button" class="icon-btn" id="today-settings" aria-label="Settings">' + GEAR + '</button></div></div>' +
     '<div class="day-head"><div class="day-navigation">' +
@@ -1836,6 +1838,7 @@ async function panelLoad(fn, panelId, render, loadingText) {
 /* ---------- Ahead and Money pages ---------- */
 function pageHead(name, title) {
   return '<div class="top"><span class="eyebrow">LIFE HQ</span><div class="top-actions">' +
+    (name === 'ahead' ? '<a class="icon-btn" href="https://app.todoist.com/app/upcoming" target="_blank" rel="noopener" aria-label="Open Todoist">' + TODOIST_SVG + '</a>' : '') +
     '<button type="button" class="icon-btn" id="' + name + '-refresh" aria-label="Refresh">' + REFRESH_SVG + '</button>' +
     '<button type="button" class="icon-btn" id="' + name + '-settings" aria-label="Settings">' + GEAR + '</button></div></div>' +
     '<h1 class="page-title">' + title + '</h1>' +
