@@ -653,3 +653,19 @@ html.share-mode .eyebrow{visibility:hidden}
 /* v48: windows sit above the keyboard and never taller than the visible screen */
 .sheet{bottom:var(--kb,0px);max-height:min(88vh,calc(var(--vvh,100vh) - 16px))}
 .today-more{display:block;margin:6px auto 0;font-size:13px}
+/* v49: Ahead days as cards */
+.tv .ahead-day{border:1px solid var(--line);border-radius:18px;padding:14px 16px 10px;margin:0 0 14px;background:var(--card)}
+.tv .ahead-day.first{border-color:var(--ink);box-shadow:3px 4px 0 var(--ink)}
+.tv .ahead-day h3.ad-head{display:flex;align-items:baseline;gap:8px;text-align:left;margin:0 0 2px;font-weight:600}
+.tv .ad-day{font-size:1.35rem;font-weight:700;letter-spacing:-.01em}
+.tv .ad-date{font-size:.95rem;color:var(--muted)}
+.tv .ad-rel{margin-left:auto;font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted2);border:1px solid var(--line2);border-radius:999px;padding:3px 9px;align-self:center}
+.tv .ahead-day.first .ad-rel{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.tv .ad-count{font-size:.8rem;color:var(--muted);margin:0 0 8px;padding-bottom:8px;border-bottom:1px solid var(--line3)}
+.tv .ahead-row.ad-event{border-left:3px solid #4a7fd6;padding-left:9px;margin-left:-2px;border-radius:2px}
+.tv .ahead-day .muted{margin:6px 0 4px;font-size:.9rem}
+.tv #next-days .ahead-day:last-child{margin-bottom:6px}
+.tv .ad-head{flex-wrap:wrap}.tv .ad-date{white-space:nowrap}
+.recent-toggle{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;border:0;background:transparent;color:inherit;padding:6px 0;min-height:40px;font:inherit}
+.recent-toggle h2{margin:0}.recent-toggle .rc-n{font-weight:500;color:var(--muted)}
+.recent-toggle svg{transition:transform .15s;color:var(--muted)}.recent-toggle[aria-expanded=true] svg{transform:rotate(180deg)}

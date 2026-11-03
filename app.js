@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v48 · 3 Nov';
+const APP_VERSION = 'v50 · 3 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -728,8 +728,9 @@ function logRender() {
     '<div class="time-bar">' + timePill(timeLabel) + '</div>' + (S.timeOpen && !S.sheet ? timePanel(now) : '') +
     trialView() + logInboxView() + checkinView() + quickView() +
     (waiting ? '<div class="queue-note"><span>' + waiting + ' waiting to send</span><button type="button" class="link-btn" data-act="flush">Send now</button></div>' : '') +
-    (rows.length || failed.length ? '<section class="recent" aria-label="Logged today"><h2>LOGGED TODAY</h2>' + missingRows().map((m) =>
-      '<div class="lrow warn"><span class="t">' + esc(m.r.hm) + '</span><span>' + esc(m.miss.join(', ')) + ' not in the sheet</span><button type="button" class="link-btn" data-act="readd" data-v="' + esc(m.r.id) + '">Re-add</button></div>').join('') + rows.map((r) =>
+    // v49: Logged today is folded by default; just-logged entries (with Undo) and problems still show.
+    (rows.length || failed.length ? '<section class="recent" aria-label="Logged today"><button type="button" class="recent-toggle" data-act="logged-toggle" aria-expanded="' + !!S.loggedOpen + '"><h2>LOGGED TODAY <span class="rc-n">' + rows.length + '</span></h2><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>' + missingRows().map((m) =>
+      '<div class="lrow warn"><span class="t">' + esc(m.r.hm) + '</span><span>' + esc(m.miss.join(', ')) + ' not in the sheet</span><button type="button" class="link-btn" data-act="readd" data-v="' + esc(m.r.id) + '">Re-add</button></div>').join('') + rows.filter((r) => S.loggedOpen || r.status === 'pending').map((r) =>
       '<div class="lrow"><span class="t">' + esc(r.hm || '–') + '</span><span>' + esc(r.text) + '</span>' +
       (r.status === 'pending' ? '<button type="button" class="link-btn" data-act="undo" data-v="' + esc(r.id) + '">Undo</button>' :
         r.local && r.status !== 'saved' ? '<span class="st">Waiting</span>' : '<span class="st">' + esc(r.src || '') + '</span>') + '</div>').join('') +
@@ -1211,6 +1212,7 @@ function logAct(el) {
     return;
   }
   if (act === 'sheet-close') { closeSheet(); return; }
+  if (act === 'logged-toggle') { S.loggedOpen = !S.loggedOpen; logRender(); return; }
   if (act === 'today-all') { S.todayAll = S.todayAll === v ? null : v; logRender(); return; }
   if (act === 'refresh') {
     if (S.refreshing) return;
@@ -1926,7 +1928,7 @@ function loadOptionalWeek() {
   if (!panel) return;
   return panelLoad('getOptionalTasks', 'optional-week', (result) => {
     panel.replaceChildren();
-    const h = document.createElement('h3'); h.className = 'optional-title'; h.textContent = 'Optional'; panel.appendChild(h);
+    const h = document.createElement('h3'); h.className = 'optional-title'; h.textContent = 'Optional this week'; panel.appendChild(h);
     const tasks = (result && result.tasks) || [];
     if (!tasks.length) { const p = document.createElement('p'); p.className = 'muted'; p.style.textAlign = 'center'; p.textContent = 'Nothing optional this week.'; panel.appendChild(p); return; }
     let last = null;
@@ -1956,13 +1958,23 @@ function loadNextFewDays() {
     [result.calendarError, result.tasksError].filter(Boolean).forEach((error) => {
       const w = document.createElement('p'); w.className = 'status'; w.textContent = error; panel.appendChild(w);
     });
-    result.days.forEach((day) => {
-      const block = document.createElement('section'); block.className = 'ahead-day';
-      const heading = document.createElement('h3'); heading.textContent = day.label; block.appendChild(heading);
+    result.days.forEach((day, di) => {
+      // v49: each day is its own card: weekday large, date small, "Tomorrow" / "In 2 days", and a count.
+      const block = document.createElement('section'); block.className = 'ahead-day' + (di === 0 ? ' first' : '');
+      const parts = String(day.label || '').split(' ');
+      const iso = /^\d{4}-\d{2}-\d{2}$/.test(day.date || '') ? day.date : '';
+      const ahead = iso ? Math.round((keyToDate(iso) - keyToDate(dayKey(new Date()))) / 86400000) : di + 1;
+      const rel = ahead === 0 ? 'Today' : ahead === 1 ? 'Tomorrow' : 'In ' + ahead + ' days';
+      const nEv = day.calendar.length, nTk = day.tasks.length + day.deadlines.length;
+      const heading = document.createElement('h3'); heading.className = 'ad-head';
+      heading.innerHTML = '<span class="ad-day">' + esc(parts[0] || day.label) + '</span><span class="ad-date">' + esc(parts.slice(1).join(' ')) + '</span>' +
+        '<span class="ad-rel">' + esc(rel) + '</span>';
+      block.appendChild(heading);
+      if (nEv || nTk) { const c = document.createElement('div'); c.className = 'ad-count'; c.textContent = [nEv ? nEv + (nEv === 1 ? ' event' : ' events') : '', nTk ? nTk + (nTk === 1 ? ' task' : ' tasks') : ''].filter(Boolean).join(' · '); block.appendChild(c); }
       const group = (label, items, calendar) => {
         if (!items.length) return;
         items.forEach((item) => {
-          const row = document.createElement('div'); row.className = 'ahead-row';
+          const row = document.createElement('div'); row.className = 'ahead-row' + (calendar ? ' ad-event' : '');
           const time = document.createElement('span'); time.className = 'ahead-time'; time.textContent = item.time || '';
           const content = document.createElement('div');
           let name;
