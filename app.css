@@ -640,3 +640,8 @@ html.share-mode .view{padding-bottom:40px}
 .ep-row b{display:block;font-size:15px}.ep-row small{color:var(--muted);font-size:12.5px}.ep-row em{font-style:normal;font-size:12.5px;color:var(--muted2);text-align:right}
 .ep-day{margin-top:-4px}.ep-tag{display:inline-block;padding:3px 9px;border-radius:999px;background:var(--soft);font-size:12.5px;margin:2px 4px 2px 0}
 html.share-mode .eyebrow{visibility:hidden}
+.tr-h-main{font-size:24px;letter-spacing:-.01em}
+.tr-h-sub{text-align:center;color:var(--muted);font-size:13px;margin:-6px 0 10px}
+.tr-sub-c{text-align:center}.tr-gichips{justify-content:center}
+@media (hover:hover){.hist-row:not(.head):hover,.ep-row:hover,.pt-btn:hover{outline:1.5px solid var(--ink);outline-offset:2px;border-radius:8px}
+.tr-cell[data-tr]:hover,.tr-hit:hover{outline:1.5px solid var(--ink);outline-offset:1px}}

@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v43 · 3 Nov';
+const APP_VERSION = 'v44 · 3 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2436,7 +2436,7 @@ function trendsRender() {
   const T2 = trendsDays();
   if (!T2) {
     if (!Conn.canLog()) body.innerHTML = '<div class="notice">Pair this device once to see your health trends.<button type="button" class="log wide" data-tr="pair">Pair this device</button></div>';
-    else if (TR.loading) body.innerHTML = '<p class="small tr-center">Loading your check-ins…</p>';
+    else if (TR.loading) body.innerHTML = '<p class="small tr-center">Loading…</p>';
     else if (SHARE_ID) body.innerHTML = '<div class="notice">Couldn’t load the log' + (SHR.loadError ? ' (' + esc(SHR.loadError) + ')' : '') + '. Try again in a minute.</div>';
     else body.innerHTML = '<div class="notice">This page needs the receiver update (HealthLog v6). Once it’s deployed, this page fills in by itself.</div>';
     return;
@@ -2483,16 +2483,15 @@ function trendsRender() {
         (Object.keys(x.dev || {}).filter((kk) => x.dev[kk] >= SYM_WORSE).length ? ' · above usual: ' + Object.keys(x.dev).filter((kk) => x.dev[kk] >= SYM_WORSE).map((kk) => { const t = TREND_SYMS.find((y) => y.k === kk); return t.name.toLowerCase() + (t.inv ? ' −' : ' +') + x.dev[kk].toFixed(1); }).join(', ') : '') +
         (x.readings ? ' · ' + x.readings + (x.readings === 1 ? ' reading' : ' readings') : '') + (T2.means ? '' : ' · daily highs')
       : (x && x.flare ? 'part of a flare · ' : '') + (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>' + dayStrip(sel);
-  } else dayHtml += '<p class="tr-detail muted">Tap a day for its scores and a 24-hour view.</p>';
+  }
   if (sel) { const on = episodesOn(sel, today); if (on.length) dayHtml += '<p class="tr-detail ep-day">' + on.map((e) => '<span class="ep-tag">' + esc(e.text) + '</span>').join(' ') + '</p>'; }
-  dayHtml += episodesHtml(today);
 
   // v37: the symptom chart comes first, with a title; the day-by-day calendar follows.
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS);
-  let html = '<h2 class="tr-h tr-h-first">Symptoms over time' + infoI('Overall = your day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Bars at the bottom = activity. Tap (or hover over) a day for its details.') + '</h2>';
+  let html = '<h2 class="tr-h tr-h-first tr-h-main">Overall health' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Under the chart: stress (0–5, “str”) and activity bars, on the same days.') + '</h2><p class="tr-h-sub">All symptoms, day by day, over the last six weeks</p>';
   html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
-  html += trendsChart(T2) + stressChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
+  html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
   html += '<h2 class="tr-h">Day by day' + infoI('Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
   html += stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + trialEffectHtml(T2, today) + planHtml(today, today >= COMPARE_FROM, true) : '') + sleepView(T2);
   html += SHARE_ID ? '<p class="small tr-hint">View-only copy of Ru’s health log. It updates by itself.</p>' : fileLinks([['Health tracker', LINKS.healthSheet]]);
@@ -2550,7 +2549,10 @@ function trendsChart(T2) {
   const list = recent42.slice(Math.max(0, Math.min(firstData < 0 ? 0 : firstData, recent42.length - 14)));
   const hasAct = list.some((x) => x.d.al);
   const BAND = hasAct ? 30 : 0;
-  const W = 360, H = 190 + BAND, L = 22, R = 8, TOP = 16, B = 22 + BAND;
+  // v44: stress (0–5) sits in its own band right under the chart, on the same days.
+  const stressOf = (x) => (giNum(symVal(x.d, 'x')) ? symVal(x.d, 'x') : null);
+  const SB = list.some((x) => stressOf(x) !== null) ? 34 : 0;
+  const W = 360, H = 190 + BAND + SB, L = 22, R = 8, TOP = 16, B = 22 + BAND + SB;
   const n = list.length, cw = W - L - R, ch = H - TOP - B;
   const X = (i) => L + (n > 1 ? (i * cw) / (n - 1) : 0);
   const Y = (v) => TOP + ch - (v / 10) * ch;
@@ -2589,10 +2591,17 @@ function trendsChart(T2) {
     svg += '<path d="' + path(get) + '" fill="none" class="tr-load"/>' + dots(get, 'tr-loaddot');
     list.forEach((x, i) => { if ((x.flare || x.badDay) && x.load !== null) svg += '<circle cx="' + X(i) + '" cy="' + Y(x.load) + '" r="3.6" class="tr-flaredot' + (x.flare ? '' : ' ring') + '"/>'; });
   }
+  if (SB) {
+    const top = TOP + ch + 10, hgt = SB - 12, sy = (v) => top + hgt - (v / 5) * hgt;
+    svg += '<text x="' + (L - 5) + '" y="' + (top + hgt / 2 + 3) + '" class="tr-ax" text-anchor="end">str</text><line x1="' + L + '" x2="' + (W - R) + '" y1="' + (top + hgt) + '" y2="' + (top + hgt) + '" class="tr-grid"/><line x1="' + L + '" x2="' + (W - R) + '" y1="' + top + '" y2="' + top + '" class="tr-grid"/>';
+    let d = '', pen = false;
+    list.forEach((x, i) => { const v = stressOf(x); if (v === null) return; d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + sy(v).toFixed(1); pen = true; });
+    svg += '<path d="' + d + '" fill="none" class="tr-stress"/>' + list.map((x, i) => { const v = stressOf(x); return v === null ? '' : '<circle cx="' + X(i).toFixed(1) + '" cy="' + sy(v).toFixed(1) + '" r="1.9" class="tr-stressdot"/>'; }).join('');
+  }
   // Activity load as thin bars under the chart, on the same days.
   if (hasAct) {
     const max = Math.max.apply(null, list.map((x) => x.d.al || 0));
-    const top = TOP + ch + 8, hgt = BAND - 10, bwid = Math.max(2, Math.min(8, (cw / Math.max(1, n - 1)) * 0.6));
+    const top = TOP + ch + 8 + SB, hgt = BAND - 10, bwid = Math.max(2, Math.min(8, (cw / Math.max(1, n - 1)) * 0.6));
     svg += '<text x="' + (L - 5) + '" y="' + (top + hgt - 2) + '" class="tr-ax" text-anchor="end">act</text><line x1="' + L + '" x2="' + (W - R) + '" y1="' + (top + hgt) + '" y2="' + (top + hgt) + '" class="tr-grid"/>';
     list.forEach((x, i) => {
       if (!x.d.al) return;
@@ -2604,7 +2613,7 @@ function trendsChart(T2) {
   const colW = n > 1 ? cw / (n - 1) : cw;
   list.forEach((x, i) => {
     const vals = TREND_SYMS.filter((sm) => typeof symVal(x.d, sm.k) === 'number').map((sm) => sm.name.toLowerCase() + ' ' + (sm.inv ? Math.round((10 - symVal(x.d, sm.k)) * 10) / 10 : symVal(x.d, sm.k)));
-    const tip = [longDate(x.key), x.load !== null ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') : 'no scores', avg7[i] !== null ? '7-day average ' + avg7[i].toFixed(1) : '', x.flare ? 'flare' : x.badDay ? 'bad day' : '', vals.join(', '), x.d.am ? x.d.am + ' min active' : ''].filter(Boolean).join(' · ');
+    const tip = [longDate(x.key), x.load !== null ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') : 'no scores', avg7[i] !== null ? '7-day average ' + avg7[i].toFixed(1) : '', x.flare ? 'flare' : x.badDay ? 'bad day' : '', vals.join(', '), stressOf(x) !== null ? 'stress ' + stressOf(x) + '/5' : '', x.d.am ? x.d.am + ' min active' : ''].filter(Boolean).join(' · ');
     svg += '<rect x="' + Math.max(L, X(i) - colW / 2).toFixed(1) + '" y="' + TOP + '" width="' + colW.toFixed(1) + '" height="' + (H - TOP - 10) + '" class="tr-hit" data-tip="' + esc(tip) + '"/>';
   });
   return svg + '</svg>';
@@ -2797,9 +2806,9 @@ function dayPartsView(G, today) {
     svg += '<line x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="1" y2="' + (H - 11) + '" class="tr-omeline"/>';
   }
   svg += '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(first)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(today)) + '</text></svg>';
-  return '<div class="tr-sub">Through the day</div><div class="tr-chips tr-gichips">' + [['pain', 'Pain'], ['bloat', 'Bloating'], ['both', 'Both']].map(([k, l]) =>
+  return '<div class="tr-sub tr-sub-c">Through the day</div><div class="tr-chips tr-gichips">' + [['pain', 'Pain'], ['bloat', 'Bloating'], ['both', 'Both']].map(([k, l]) =>
     '<button type="button" class="tr-chip" data-tr="gi" data-v="' + k + '" aria-pressed="' + (giMode() === k) + '">' + l + '</button>').join('') + '</div>' + svg +
-    '<div class="tr-key"><span><i class="tr-omeline-key"></i>Omeprazole started</span><span>Tap a day for its readings</span></div>' +
+    '<div class="tr-key"><span><i class="tr-omeline-key"></i>Omeprazole started</span></div>' +
     patBtn('stomach', 'Stomach patterns');
 }
 /* Stomach patterns: mornings before vs since omeprazole, and probiotic (before vs since, and days taken vs not). */
@@ -2894,7 +2903,7 @@ function stomachView(T2) {
     (G ? '<p class="tr-detail muted" style="margin-top:4px">Colour = the day’s average stomach pain.</p>' : '');
   const k = TR.ssel && TR.ssel <= today ? TR.ssel : null;
   const parts = G ? dayPartsView(G, today) : '';
-  if (!k) return html + '<p class="tr-detail muted">Tap a day to see what you ate.</p>' + parts;
+  if (!k) return html + parts;
   const d = (by[k] || {}).d || {};
   const g = G && G.by[k];
   const when = g ? GI_PARTS.map((name, i) => (giNum(g[i + 1]) ? name.toLowerCase() + ' ' + g[i + 1] : '')).filter(Boolean).join(', ') : '';
@@ -2958,7 +2967,7 @@ function sleepView(T2) {
   };
   const minsWord = (dm) => { const m = Math.round(Math.abs(dm)); return m < 15 ? 'about usual' : (m >= 60 ? (m / 60).toFixed(1).replace('.0', '') + ' h' : m + ' min') + (dm > 0 ? ' later than usual' : ' earlier than usual'); };
   const numWord = (unit, more, less) => (dv) => (Math.abs(dv) < 0.25 ? 'about usual' : Math.abs(dv).toFixed(1) + unit + ' ' + (dv > 0 ? more : less) + ' than usual');
-  let html = '<h2 class="tr-h">Sleep' + infoI('Each bar is one night, from falling asleep (bottom) up to waking (top); the dashed part above is time in bed before getting up. Colour = sleep quality; grey = not rated. White lines = how disturbed (one per point out of 5). Dashed lines = your usual sleep and waking times (the 4 weeks before the last 7 nights). Naps aren’t included yet. Tap a night for its details.') + '</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
+  let html = '<h2 class="tr-h">Sleep' + infoI('Each bar is one night, from falling asleep (bottom) up to waking (top); the dashed part above is time in bed before getting up. Colour = sleep quality; grey = not rated. White lines = how disturbed (one per point out of 5). Dashed lines = your usual sleep and waking times (the 4 weeks before the last 7 nights). Naps aren’t included yet.') + '</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
     stat('Fell asleep', 'bed', clockText, minsWord) +
     stat('Hours asleep', 'hours', (v) => v.toFixed(1), (dv) => numWord(' h', 'more', 'less')(dv) + (T2.list.slice(-7).some((x) => x.d.np) ? ' · nights only, a nap not counted' : '')) +
     stat('Quality', 'q', (v) => v.toFixed(1) + '/10', numWord('', 'higher', 'lower')) + '</div>';
@@ -3009,7 +3018,7 @@ function medsView(today) {
   const firstKey = taken[0] || today;
   // v34: the Log tab's 14-day rows; tap one to open its full calendar below.
   let html = '<h2 class="tr-h">Medication</h2><div class="tr-medhist">' + historyView('health') + '</div>' + ((cfg.suppPlan || suppList().length) ? patBtn('suppplan', 'Supplements: products and plan') : '');
-  if (!TR.medOpen || !data[TR.medOpen]) return html + '<p class="small tr-hint">Tap a medicine for its full calendar.</p>';
+  if (!TR.medOpen || !data[TR.medOpen]) return html;
   html += '<div class="tr-medsel"><b>' + esc(cur) + '</b></div>';
   html += calGrid('med-' + cur, cur + ' calendar', firstKey, today, (k) => {
     const n = d.byDay[k] || 0, day = keyToDate(k).getDate();
