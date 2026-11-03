@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v47 · 3 Nov';
+const APP_VERSION = 'v48 · 3 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -759,8 +759,28 @@ function timePanel(now) {
 function todayListHtml(kind) {
   const rows = todayEntries().filter((r) => r.kind === kind).reverse();
   if (!rows.length) return '';
-  return '<div class="sheet-today"><div class="opt-h">Today</div>' + rows.map((r) => '<div class="lrow"><span class="t">' + esc(r.hm || '–') + '</span><span>' + esc(r.text) + '</span></div>').join('') + '</div>';
+  // v48: the 3 latest, with the rest behind "Show all", so the window stays short.
+  const all = S.todayAll === kind, shown = all ? rows : rows.slice(0, 3);
+  return '<div class="sheet-today"><div class="opt-h">Today</div>' + shown.map((r) => '<div class="lrow"><span class="t">' + esc(r.hm || '–') + '</span><span>' + esc(r.text) + '</span></div>').join('') +
+    (rows.length > 3 ? '<button type="button" class="link-btn today-more" data-act="today-all" data-v="' + kind + '">' + (all ? 'Show fewer' : 'Show all ' + rows.length) + '</button>' : '') + '</div>';
 }
+/* v48: keep windows above the iPhone keyboard. The visual viewport shrinks when the keyboard opens;
+   the open window is sized and lifted to fit what's actually visible, so its text box can't end up off-screen. */
+(function keyboardFit() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const fit = () => {
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    ROOT.style.setProperty('--kb', kb + 'px');
+    ROOT.style.setProperty('--vvh', vv.height + 'px');
+  };
+  vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); fit();
+})();
+document.addEventListener('focusin', (e) => {
+  const t = e.target;
+  if (!t || !t.closest || !t.closest('#sheet') || !/^(INPUT|TEXTAREA)$/.test(t.tagName) || /^(range|checkbox|radio|datetime-local)$/.test(t.type)) return;
+  setTimeout(() => { try { t.scrollIntoView({ block: 'nearest' }); } catch (err) {} }, 320);
+});
 /* Safety net: a medication entry this phone saved whose rows have since gone from the sheet (seen on 28 and
    29 Oct, cause unknown). Only checked against a sheet read taken after the save. */
 function missingRows() {
@@ -1191,6 +1211,7 @@ function logAct(el) {
     return;
   }
   if (act === 'sheet-close') { closeSheet(); return; }
+  if (act === 'today-all') { S.todayAll = S.todayAll === v ? null : v; logRender(); return; }
   if (act === 'refresh') {
     if (S.refreshing) return;
     S.refreshing = true; logRender();

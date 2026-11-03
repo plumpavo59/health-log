@@ -650,3 +650,6 @@ html.share-mode .eyebrow{visibility:hidden}
 .tr-tabs button[aria-pressed=true]{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
 @media (hover:hover){.tr-tabs button:not([aria-pressed=true]):hover{color:var(--ink)}}
 .tr-tabs + .tr-h{margin-top:6px}
+/* v48: windows sit above the keyboard and never taller than the visible screen */
+.sheet{bottom:var(--kb,0px);max-height:min(88vh,calc(var(--vvh,100vh) - 16px))}
+.today-more{display:block;margin:6px auto 0;font-size:13px}
