@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v42 · 3 Nov';
+const APP_VERSION = 'v43 · 3 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -1143,7 +1143,8 @@ async function logRefreshConfig() {
   if (!Conn.canLog()) return;
   try {
     const res = await api(SHARE_ID ? { action: 'config', visit: !SHR.visitSent } : { action: 'config' });
-    if (SHARE_ID && res && res.success) SHR.visitSent = true;
+    if (SHARE_ID && res && res.success) { SHR.visitSent = true; SHR.loadError = ''; }
+    if (SHARE_ID && res && !res.success && res.auth !== false) SHR.loadError = res.error || 'No answer.';
     if (res && res.success) {
       cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds,
         supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, suppPlan: res.suppPlan || null, episodes: res.episodes || [], clarity: !!res.clarity, today: res.today || FALLBACK.today };
@@ -1158,7 +1159,7 @@ async function logRefreshConfig() {
       if (view === 'trends') trendsRender();
       return true;
     }
-  } catch (e) {}
+  } catch (e) { if (SHARE_ID) SHR.loadError = 'no connection to Google'; }
   return false;
 }
 
@@ -2252,13 +2253,13 @@ const TRENDS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 /* Share mode: password screen and a light visit record (last opened, visits, minutes, taps). */
 const SHR = { error: '', visitSent: false, secs: 0, taps: 0, lastTick: Date.now() };
 function shareGateHtml() {
-  return '<form class="share-gate" id="share-gate" autocomplete="off"><p>This is a view-only copy of Ru’s health log. Enter the password Ru gave you.</p>' +
-    '<input type="password" id="share-pw" class="text-input" aria-label="Password" autocomplete="current-password" required minlength="8">' +
+  return '<form class="share-gate" id="share-gate" autocomplete="off">' +
+    '<input type="password" id="share-pw" class="text-input" placeholder="Enter password" aria-label="Password" autocomplete="current-password" required minlength="8">' +
     (SHR.error ? '<p class="share-err" role="alert">' + esc(SHR.error) + '</p>' : '') +
     '<button type="submit" class="log wide">Open</button></form>';
 }
 if (SHARE_ID) {
-  document.title = 'Health log';
+  document.title = 'Ru’s Health and GI Log';
   document.addEventListener('submit', (e) => {
     if (e.target.id !== 'share-gate') return;
     e.preventDefault();
@@ -2287,7 +2288,7 @@ function trendsEnter() {
     el.innerHTML = '<div class="top"><span class="eyebrow">LIFE HQ</span><div class="top-actions">' +
       '<button type="button" class="icon-btn" id="trends-refresh" aria-label="Refresh">' + REFRESH_SVG + '</button>' +
       '<button type="button" class="icon-btn" id="trends-settings" aria-label="Settings">' + GEAR + '</button></div></div>' +
-      '<h1 class="page-title">Health</h1><div id="trends-body" aria-live="polite"></div>';
+      '<h1 class="page-title">' + (SHARE_ID ? 'Ru’s Health and GI Log' : 'Health') + '</h1><div id="trends-body" aria-live="polite"></div>';
     $('trends-refresh').onclick = () => spin($('trends-refresh'), trendsLoad);
     $('trends-settings').onclick = () => openSettings();
     el.addEventListener('click', trendsClick);
@@ -2436,6 +2437,7 @@ function trendsRender() {
   if (!T2) {
     if (!Conn.canLog()) body.innerHTML = '<div class="notice">Pair this device once to see your health trends.<button type="button" class="log wide" data-tr="pair">Pair this device</button></div>';
     else if (TR.loading) body.innerHTML = '<p class="small tr-center">Loading your check-ins…</p>';
+    else if (SHARE_ID) body.innerHTML = '<div class="notice">Couldn’t load the log' + (SHR.loadError ? ' (' + esc(SHR.loadError) + ')' : '') + '. Try again in a minute.</div>';
     else body.innerHTML = '<div class="notice">This page needs the receiver update (HealthLog v6). Once it’s deployed, this page fills in by itself.</div>';
     return;
   }
