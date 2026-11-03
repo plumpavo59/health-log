@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v44 · 3 Nov';
+const APP_VERSION = 'v45 · 3 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -1147,7 +1147,7 @@ async function logRefreshConfig() {
     if (SHARE_ID && res && !res.success && res.auth !== false) SHR.loadError = res.error || 'No answer.';
     if (res && res.success) {
       cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds,
-        supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, suppPlan: res.suppPlan || null, episodes: res.episodes || [], clarity: !!res.clarity, today: res.today || FALLBACK.today };
+        supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, suppPlan: res.suppPlan || null, episodes: res.episodes || [], share: res.share || null, clarity: !!res.clarity, today: res.today || FALLBACK.today };
       if ($('medications') && !$('medications').hidden) renderRecentMeds();
       if (S.sheet && document.activeElement && /INPUT/.test(document.activeElement.tagName) && document.activeElement.closest('#sheet')) {
         LS.set('config', { data: cfg, day: dayKey(new Date()) });   // don't rebuild a sheet while typing in it
@@ -2244,7 +2244,7 @@ const TREND_SYMS = [
 const COMPARE_FROM = '2026-12-01';
 const USUAL_DAYS = 28, USUAL_MIN = 5, MIN_READINGS = 2;
 const SYM_WORSE = 1.0, SYM_MUCH = 2.0, AVG_WORSE = 0.5, AVG_MUCH = 1.25, AVG_BETTER = -0.75;
-const TR = { gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc3', TREND_SYMS.map((x) => x.k)), days: {} };
+const TR = { sec: SHARE_ID ? null : LS.get('trends.sec', null), gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc3', TREND_SYMS.map((x) => x.k)), days: {} };
 // Brain fog and headache are off by default now; move anyone still on the old default.
 
 const incSyms = () => TREND_SYMS.filter((x) => TR.inc.includes(x.k));
@@ -2488,12 +2488,17 @@ function trendsRender() {
 
   // v37: the symptom chart comes first, with a title; the day-by-day calendar follows.
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS);
-  let html = '<h2 class="tr-h tr-h-first tr-h-main">Overall health' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Under the chart: stress (0–5, “str”) and activity bars, on the same days.') + '</h2><p class="tr-h-sub">All symptoms, day by day, over the last six weeks</p>';
-  html += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
+  let over = '<h2 class="tr-h tr-h-first tr-h-main">Overall health' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Under the chart: stress (0–5, “str”) and activity bars, on the same days.') + '</h2><p class="tr-h-sub">All symptoms, day by day, over the last six weeks</p>';
+  over += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
-  html += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
-  html += '<h2 class="tr-h">Day by day' + infoI('Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
-  html += stomachView(T2) + medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + trialEffectHtml(T2, today) + planHtml(today, today >= COMPARE_FROM, true) : '') + sleepView(T2);
+  over += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
+  over += '<h2 class="tr-h">Day by day' + infoI('Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
+  // v45: Health is split into sections with tabs at the top; only the chosen one is drawn.
+  const secs = healthSections();
+  const sec = curSection(secs);
+  let html = secs.length > 1 ? '<nav class="tr-tabs" aria-label="Health sections">' + secs.map(([k, l]) => '<button type="button" data-tr="sec" data-v="' + k + '" aria-pressed="' + (sec === k) + '">' + l + '</button>').join('') + '</nav>' : '';
+  html += sec === 'overall' ? over : sec === 'gut' ? stomachView(T2) : sec === 'sleep' ? sleepView(T2)
+    : medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + trialEffectHtml(T2, today) + planHtml(today, today >= COMPARE_FROM, true) : '');
   html += SHARE_ID ? '<p class="small tr-hint">View-only copy of Ru’s health log. It updates by itself.</p>' : fileLinks([['Health tracker', LINKS.healthSheet]]);
   if (TR.pop) {
     const G = giData();
@@ -2507,6 +2512,18 @@ function trendsRender() {
   restoreCalScroll(body);
 }
 
+/* v45: Health sections. In share mode the receiver says which ones this person may see and where they start. */
+const HEALTH_SECS = [['overall', 'Overall'], ['gut', 'Gut'], ['sleep', 'Sleep'], ['medication', 'Medication']];
+function healthSections() {
+  const ok = SHARE_ID && cfg.share && Array.isArray(cfg.share.sections) ? cfg.share.sections : HEALTH_SECS.map(([k]) => k);
+  return HEALTH_SECS.filter(([k]) => ok.includes(k));
+}
+function curSection(secs) {
+  const keys = secs.map(([k]) => k);
+  if (TR.sec && keys.includes(TR.sec)) return TR.sec;
+  const first = SHARE_ID && cfg.share && keys.includes(cfg.share.open) ? cfg.share.open : keys[0];
+  return first || 'overall';
+}
 /* v40: health episodes (colds, eczema flares …) from the Episodes tab, shown on each day and as a list. */
 function episodesOn(k, today) {
   return (cfg.episodes || []).filter((e) => e.from <= k && (!e.to || k <= e.to) && k <= today).map((e) => {
@@ -3090,6 +3107,7 @@ function trendsClick(ev) {
   else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
   else if (act === 'medrow') { TR.medOpen = TR.medOpen === v ? null : v; trendsRender(); }
   else if (act === 'gi') { TR.gi = v; LS.set('trends.gi2', v); trendsRender(); }
+  else if (act === 'sec') { TR.sec = v; TR.pop = null; LS.set('trends.sec', v); trendsRender(); const tabs = document.querySelector('.tr-tabs'); if (tabs && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView(); }
   else if (act === 'pat-close') closePatterns();
   else if (act === 'pair') openSettings('pair');
 }
