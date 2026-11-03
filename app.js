@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v40 · 3 Nov';
+const APP_VERSION = 'v41 · 3 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2505,7 +2505,8 @@ function trendsRender() {
 function episodesOn(k, today) {
   return (cfg.episodes || []).filter((e) => e.from <= k && (!e.to || k <= e.to) && k <= today).map((e) => {
     const n = dayNum(e.from, k), len = e.to ? dayNum(e.from, e.to) : null;
-    return { e, text: e.name + ' · day ' + n + (len ? ' of ' + len : '') + (e.peak === k ? ' (peak)' : '') + (!e.to ? ' (ongoing)' : '') };
+    const peak = e.peak && k >= e.peak && k <= (e.peakTo || e.peak);
+    return { e, text: e.name + ' · day ' + n + (len ? ' of ' + len : '') + (peak ? ' (peak)' : '') + (!e.to ? ' (ongoing)' : '') };
   });
 }
 function episodesHtml(today) {
@@ -2514,8 +2515,8 @@ function episodesHtml(today) {
   if (!eps.length) return '<h2 class="tr-h">Health episodes' + info + '</h2><p class="small tr-hint">None recorded yet.</p>';
   return '<h2 class="tr-h">Health episodes' + info + '</h2><div class="ep-list">' + eps.map((e) => {
     const len = dayNum(e.from, e.to || today);
-    return '<button type="button" class="ep-row' + (e.to ? '' : ' on') + '" data-tip="' + esc((e.notes || e.name) + (e.peak ? ' · peak ' + longDate(e.peak) : '')) + '"><i></i><span><b>' + esc(e.name) + '</b><small>' +
-      esc(shortDate(e.from) + (e.to ? ' – ' + shortDate(e.to) + ' · ' + len + ' days' : ' onwards · day ' + len)) + '</small></span><em>' + esc(e.status || (e.to ? 'Over' : 'Ongoing')) + '</em></button>';
+    return '<button type="button" class="ep-row' + (e.to ? '' : ' on') + '" data-tip="' + esc((e.notes || e.name) + (e.peak ? ' · peak ' + shortDate(e.peak) + (e.peakTo && e.peakTo !== e.peak ? ' – ' + shortDate(e.peakTo) : '') : '')) + '"><i></i><span><b>' + esc(e.name) + '</b><small>' +
+      esc(shortDate(e.from) + (e.to ? ' – ' + shortDate(e.to) + ' · ' + len + ' days' : ' onwards · day ' + len) + (e.peak ? ' · peak ' + shortDate(e.peak) + (e.peakTo && e.peakTo !== e.peak ? '–' + shortDate(e.peakTo) : '') : '')) + '</small></span><em>' + esc(e.status || (e.to ? 'Over' : 'Ongoing')) + '</em></button>';
   }).join('') + '</div>';
 }
 /* v40: daily stress (0–5) as a small line under the symptom chart (HealthLog v16 sends it). */
