@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v55 · 6 Nov';
+const APP_VERSION = 'v56 · 6 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -687,8 +687,11 @@ function checkinView() {
 }
 
 function sleepTimesHtml() {
-  return '<div class="sleep-times" role="group" aria-label="Sleep times">' + [['bed', 'Went to sleep'], ['wake', 'Woke'], ['up', 'Got up']].map(([k, l]) =>
-    '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') + '</div>' +
+  // v56: the Oura ring gives went-to-sleep and woke; they fold away under "Ring off?", got-up stays.
+  const keys = S.ringOff ? [['bed', 'Went to sleep'], ['wake', 'Woke'], ['up', 'Got up']] : [['up', 'Got up']];
+  return '<div class="sleep-times' + (S.ringOff ? '' : ' one') + '" role="group" aria-label="Sleep times">' + keys.map(([k, l]) =>
+    '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') +
+    '<button type="button" class="link-btn ring-off" data-act="ring-off">' + (S.ringOff ? 'Hide sleep times' : 'Ring off? Add sleep times') + '</button></div>' +
     // v54: on waking, two yes/no buttons, saved in the check-in's note ("Morning: bad taste on waking: yes").
     '<div class="wake-flags" role="group" aria-label="On waking">' + WAKE_FLAGS.map(([k, l]) => '<button type="button" class="moment-btn" data-act="wake-flag" data-v="' + k + '" aria-pressed="' + !!S.wakeFlags[k] + '">' + l + '</button>').join('') + '</div>';
 }
@@ -748,6 +751,25 @@ function logRender() {
     if (el) { el.focus({ preventScroll: true }); try { if (keep.a !== null && keep.a !== undefined) el.setSelectionRange(keep.a, keep.b); } catch (e) {} }
   }
 }
+const CAM_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+/* v56: shrink a meal photo to at most 1600 px (JPEG) so it sends quickly. */
+document.addEventListener('change', (ev) => {
+  const t = ev.target;
+  if (!t || t.id !== 'food-photo' || !t.files || !t.files[0]) return;
+  const file = t.files[0];
+  S.photoBusy = true; logRender();
+  const img = new Image(), url = URL.createObjectURL(file);
+  img.onload = () => {
+    const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    S.foodPhoto = c.toDataURL('image/jpeg', 0.8); S.photoBusy = false; logRender();
+    const f = $('food-input'); if (f) f.focus();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); S.photoBusy = false; toast('Couldn’t read that photo.'); logRender(); };
+  img.src = url;
+});
 const CAL_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>';
 const CLOCK_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
 /* One tap opens the phone's date/time picker straight away (an invisible input sits over the pill). */
@@ -931,8 +953,12 @@ function sheetView() {
   } else if (S.sheet === 'plan') {
     body = planHtml(healthKey(new Date()), false);
   } else if (S.sheet === 'food') {
-    btn = '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() ? '' : ' disabled') + '>Log</button>';
-    body = '<input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="What did you eat?" aria-label="What did you eat" autocomplete="off" enterkeyhint="send">' +
+    btn = '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() || S.foodPhoto ? '' : ' disabled') + '>Log</button>';
+    // v56: a camera button; the photo goes to Drive › Meal photo logs and the meal is marked to be interpreted later.
+    body = (S.foodPhoto ? '<div class="photo-prev"><img src="' + S.foodPhoto + '" alt="Meal photo"><button type="button" class="icon-btn photo-x" data-act="photo-clear" aria-label="Remove photo">' + X_SVG + '</button></div>' : '') +
+      '<div class="food-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="' + (S.foodPhoto ? 'Add a description (optional)' : 'What did you eat?') + '" aria-label="What did you eat" autocomplete="off" enterkeyhint="send">' +
+      '<label class="seg cam-btn" aria-label="Take a photo of the meal">' + CAM_SVG + '<input type="file" id="food-photo" accept="image/*" capture="environment"></label></div>' +
+      (S.photoBusy ? '<p class="small">Preparing the photo…</p>' : '') +
       '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div>';
   } else if (S.sheet === 'activity') {
     btn = '<button type="button" class="log" id="act-log" data-act="activity"' + (actRoute() ? '' : ' disabled') + '>' + (actRoute() === 'inbox' ? 'Send to inbox' : 'Log') + '</button>';
@@ -978,7 +1004,7 @@ function closeSheet() {
   if (!S.sheet) return;
   S.sheet = null;
   // v39: closing a window drops whatever was selected in it (typed text is kept).
-  S.meds = []; S.doses = {}; S.suppOn = false; S.supps = []; S.bristol = null; S.size = null; S.urgent = false;
+  S.foodPhoto = null; S.meds = []; S.doses = {}; S.suppOn = false; S.supps = []; S.bristol = null; S.size = null; S.urgent = false;
   S.actType = null; S.actMin = null; S.actEffort = null; S.actMinText = ''; S.moment = null;
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   logRender();
@@ -1201,6 +1227,7 @@ function logAct(el) {
   if (act === 'sheet') { openSheet(v); return; }
   if (act === 'moment-open') { S.moment = v; S.momentNote = ''; openSheet('moment'); return; }
   if (act === 'moment-pick') { S.moment = v; logRender(); return; }
+  if (act === 'ring-off') { S.ringOff = !S.ringOff; logRender(); return; }
   if (act === 'wake-flag') { S.wakeFlags[v] = !S.wakeFlags[v]; logRender(); return; }
   if (act === 'moment-pick-ci') { S.moment = S.moment === v ? null : v; logRender(); return; }
   if (act === 'moment-log') {
@@ -1327,11 +1354,13 @@ function logAct(el) {
     S.meds = []; S.doses = {}; closeSheet();
   }
   else if (act === 'food') {
-    const food = S.food.trim();
-    if (!food) return;
-    commit('food', { food }, food);
-    S.food = ''; closeSheet();
+    const food = S.food.trim(), photo = S.foodPhoto;
+    if (!food && !photo) return;
+    if (photo) commit('food', { food, photo }, 'Meal photo' + (food ? ' · ' + food : ''));
+    else commit('food', { food }, food);
+    S.food = ''; S.foodPhoto = null; closeSheet();
   }
+  else if (act === 'photo-clear') { S.foodPhoto = null; logRender(); }
   else if (act === 'checkin') {
     const period = S.period || guessPeriod();
     const stage = period === 'Wake' ? (S.stage || guessStage()) : '';
@@ -1424,7 +1453,7 @@ document.addEventListener('input', (ev) => {
     updateActButton(); const h = $('act-hint'); if (h) h.textContent = actHint();
   } else if (el.dataset.field) {
     S[el.dataset.field] = el.value;
-    if (el.dataset.field === 'food') { const b = $('food-log'); if (b) b.disabled = !el.value.trim(); }
+    if (el.dataset.field === 'food') { const b = $('food-log'); if (b) b.disabled = !el.value.trim() && !S.foodPhoto; }
     if (el.dataset.field === 'actText') updateActButton();
   }
 });
@@ -2633,7 +2662,7 @@ function trendsChart(T2) {
   const list = recent42.slice(Math.max(0, Math.min(firstData < 0 ? 0 : firstData, recent42.length - 14)));
   // v51: the activity band shows Oura steps once the ring is synced, otherwise logged activity.
   const stepsOf = (x) => (x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st : null);
-  const useSteps = list.some((x) => stepsOf(x) !== null);
+  const useSteps = false;  // v56: active minutes on this chart, so days before and after the Oura ring compare
   // v52: active minutes, shaded by how hard (light / moderate / hard, from the logged effort).
   const actOf = (x) => (useSteps ? stepsOf(x) || 0 : x.d.am || 0);
   const effortCls = (x) => { const r = x.d.am ? (x.d.al || 0) / x.d.am : 0; return r >= 2.5 ? ' hard' : r >= 1.5 ? ' mod' : ' light'; };
@@ -2740,6 +2769,29 @@ function nextDayVerdict(a, b, bName) {
 /* v53: Activity section: weekly summary, daily active minutes by effort, minutes by type, steps (Oura, once served),
    and the Activity patterns popup. */
 const OURA_FROM = '2026-11-04';  // Oura ring worn from here: activity and sleep records are more complete after this.
+/* v56: one night in detail: Oura's sleep stages strip and figures beside your own rating. */
+function nightDetail(x) {
+  const d = x.d, o = d.os || {};
+  let h = '<div class="night-det"><div class="nd-h"><b>Night to ' + esc(longDate(x.key)) + '</b><button type="button" class="link-btn" data-tr="night" data-v="' + x.key + '">Close</button></div>';
+  const times = [d.ib ? 'into bed ' + d.ib : '', d.bt ? 'asleep ' + d.bt : '', d.wk ? 'woke ' + d.wk : '', d.up ? 'out of bed ' + d.up + (o.upGuess ? ' (Oura’s guess)' : '') : ''].filter(Boolean).join(' · ');
+  if (times) h += '<p class="small">' + esc(times) + '</p>';
+  if (o.hy) {
+    // Hypnogram: one letter per 5 minutes (D deep, L light, R REM, A awake), "|" between sleep periods.
+    const seq = o.hy.replace(/\|/g, 'A'), W = 340, H = 46, cw = W / seq.length;
+    const row = { A: 0, R: 1, L: 2, D: 3 }, col = { A: '#e0b04a', R: '#a07be0', L: '#7fa3e0', D: '#2b3a8f' };
+    let svg = '<svg class="tr-chart hypno" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Sleep stages through the night">';
+    [...seq].forEach((c, i) => { if (row[c] === undefined) return; svg += '<rect x="' + (i * cw).toFixed(2) + '" y="' + (row[c] * 10 + 2) + '" width="' + (cw + 0.3).toFixed(2) + '" height="9" fill="' + col[c] + '"/>'; });
+    h += svg + '</svg><div class="tr-key"><span><i class="sl-k" style="background:#e0b04a"></i>Awake</span><span><i class="sl-k" style="background:#a07be0"></i>REM</span><span><i class="sl-k" style="background:#7fa3e0"></i>Light</span><span><i class="sl-k" style="background:#2b3a8f"></i>Deep</span></div>';
+  }
+  const cell = (l, v) => (v === undefined || v === null || v === '' ? '' : '<div class="pt-cell"><span>' + esc(l) + '</span><b>' + esc(String(v)) + '</b></div>');
+  const cells = [cell('Asleep', giNum(d.sl) ? d.sl + ' h' : ''), cell('Oura sleep score', o.ss), cell('Your rating', giNum(d.q) ? d.q + '/10' : ''), cell('Disturbed (yours)', giNum(d.z) ? d.z + '/5' : ''),
+    cell('HRV', o.hrv !== undefined ? o.hrv + ' ms' : ''), cell('Lowest heart rate', o.hr !== undefined ? o.hr + ' bpm' : ''), cell('Readiness', o.rd),
+    cell('Deep / REM / light', o.dp !== undefined ? o.dp + ' / ' + (o.rem || 0) + ' / ' + (o.lt || 0) + ' h' : ''), cell('Awake in the night', o.awk !== undefined ? o.awk + ' min' : ''),
+    cell('In bed before sleep', o.inb !== undefined ? o.inb + ' min' : ''), cell('Lying in', o.lie !== undefined ? o.lie + ' min' : ''), cell('Nap that day', giNum(d.np) && d.np > 0 ? d.np + ' h' : '')].join('');
+  if (cells) h += '<div class="pt-stats nd-grid">' + cells + '</div>';
+  if (!d.os && x.key < OURA_FROM) h += '<p class="small">Before the Oura ring: from your own check-ins.</p>';
+  return h + '</div>';
+}
 const ACT_KINDS = [['walk', 'Walking'], ['dance', 'Dance'], ['aerial', 'Aerial'], ['cycle', 'Cycling'], ['carry', 'Carrying / lifting'], ['other', 'Other']];
 function activityView(T2) {
   const list = T2.list;
@@ -3182,8 +3234,12 @@ function sleepView(T2) {
   list.forEach((x, i) => { if (keyToDate(x.key).getDay() === 1 && i < n - 3) svg += '<text x="' + (L + i * bw).toFixed(1) + '" y="' + (H - 3) + '" class="tr-ax">' + esc(shortDate(x.key)) + '</text>'; });
   const tipOf = (x, nt) => [longDate(x.key), nt.inBed !== null ? 'into bed ' + x.d.ib : '', x.d.bt ? 'asleep ' + x.d.bt : '', x.d.wk ? 'woke ' + x.d.wk : '', x.d.up ? 'up ' + x.d.up : '',
     nt.hours !== null ? nt.hours.toFixed(1) + ' h' : '', nt.q !== null ? 'quality ' + nt.q + '/10' : '', giNum(x.d.z) ? 'disturbed ' + x.d.z + '/5' : '', x.d.np ? 'nap that day' + (x.d.np > 0 ? ' (~' + x.d.np + ' h)' : '') + ': the night alone may look short' : ''].filter(Boolean);
-  list.forEach((x, i) => { const t = tipOf(x, nights[i]); if (t.length > 1) svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + base + '" class="tr-hit" data-tip="' + esc(t.join(' · ')) + '"/>'; });
+  // v56: Oura ring from 4 Nov; tap a night for its details.
+  list.forEach((x, i) => { if (x.key === OURA_FROM) svg += '<line x1="' + (L + i * bw).toFixed(1) + '" x2="' + (L + i * bw).toFixed(1) + '" y1="' + top + '" y2="' + base + '" class="tr-mark"/><text x="' + (L + i * bw - 3).toFixed(1) + '" y="' + (top + 8) + '" class="tr-ax" text-anchor="end">Oura ring from here</text>'; });
+  list.forEach((x, i) => { const t = tipOf(x, nights[i]); if (t.length > 1) svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + base + '" class="tr-hit' + (TR.night === x.key ? ' on' : '') + '" data-tr="night" data-v="' + x.key + '" data-tip="' + esc(t.join(' · ')) + '"/>'; });
   svg += '</svg>';
+  const sel = TR.night && list.find((x) => x.key === TR.night);
+  if (sel) svg += nightDetail(sel);
   html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span>' + (list.some((x) => x.d.np) ? '<span><i class="sl-k sl-napk"></i>Nap that day</span>' : '') + '<span><i class="sl-k sl-lie"></i>In bed, awake (before sleep and after waking)</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual</span></div>' +
     '' + patBtn('sleep', 'Sleep patterns');
   return html;
@@ -3273,6 +3329,7 @@ function trendsClick(ev) {
   else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
   else if (act === 'medrow') { TR.medOpen = TR.medOpen === v ? null : v; trendsRender(); }
   else if (act === 'gi') { TR.gi = v; LS.set('trends.gi2', v); trendsRender(); }
+  else if (act === 'night') { TR.night = TR.night === v ? null : v; trendsRender(); }
   else if (act === 'actlag') { TR.actLag = Number(v); trendsRender(); }
   else if (act === 'sec') { TR.sec = v; TR.pop = null; LS.set('trends.sec', v); trendsRender(); const tabs = document.querySelector('.tr-tabs'); if (tabs && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView(); }
   else if (act === 'pat-close') closePatterns();
