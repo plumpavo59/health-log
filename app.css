@@ -680,3 +680,9 @@ html.share-mode .eyebrow{visibility:hidden}
 .pt-table tr.top td{font-weight:650}
 .tr-week{stroke:var(--line3);stroke-width:1}
 .tr-band{font-size:8.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;fill:var(--muted2)}
+.tr-actbar.light{fill:#9cc0ec}.tr-actbar.mod{fill:#4a7fd6}.tr-actbar.hard{fill:#1f4e9c}
+.act-key{margin-top:-4px}.act-key .ak{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.ak.light{background:#9cc0ec}.ak.mod{background:#4a7fd6}.ak.hard{background:#1f4e9c}
+.date-pick{position:relative;padding:0 10px;margin-left:6px;min-width:40px;justify-content:center}
+.date-pick svg{width:16px;height:16px}
+.date-pick{overflow:hidden}
