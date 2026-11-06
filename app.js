@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v52 · 6 Nov';
+const APP_VERSION = 'v53 · 6 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2544,13 +2544,13 @@ function trendsRender() {
   let over = '<h2 class="tr-h tr-h-first tr-h-main">Overall health' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Under the chart, on the same days: stress (0–5) and active minutes per day, shaded by effort (light, moderate, hard).') + '</h2><p class="tr-h-sub">All symptoms, day by day, over the last six weeks</p>';
   over += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
-  over += trendsChart(T2) + (T2.list.some((x) => x.d.am) ? '<div class="tr-key act-key"><span><i class="ak light"></i>Light</span><span><i class="ak mod"></i>Moderate</span><span><i class="ak hard"></i>Hard</span><span class="muted">activity effort</span></div>' : '') + (T2.list.some((x) => x.d.al || (x.d.oura && x.d.oura.st)) ? patBtn('activity', 'Activity patterns') : '');
+  over += trendsChart(T2) + (T2.list.some((x) => x.d.am) ? '<div class="tr-key act-key"><span><i class="ak light"></i>Light</span><span><i class="ak mod"></i>Moderate</span><span><i class="ak hard"></i>Hard</span><span class="muted">activity effort</span></div>' : '');
   over += '<h2 class="tr-h">Day by day' + infoI('Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
   // v45: Health is split into sections with tabs at the top; only the chosen one is drawn.
   const secs = healthSections();
   const sec = curSection(secs);
   let html = secs.length > 1 ? '<nav class="tr-tabs" aria-label="Health sections">' + secs.map(([k, l]) => '<button type="button" data-tr="sec" data-v="' + k + '" aria-pressed="' + (sec === k) + '">' + l + '</button>').join('') + '</nav>' : '';
-  html += sec === 'overall' ? over : sec === 'gut' ? stomachView(T2) : sec === 'sleep' ? sleepView(T2)
+  html += sec === 'overall' ? over : sec === 'gut' ? stomachView(T2) : sec === 'sleep' ? sleepView(T2) : sec === 'activity' ? activityView(T2)
     : medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + trialEffectHtml(T2, today) + planHtml(today, today >= COMPARE_FROM, true) : '');
   if (SHARE_ID) html += '<p class="small tr-hint">View-only copy of Ru’s health log. It updates by itself.</p>';
   if (TR.pop) {
@@ -2566,7 +2566,7 @@ function trendsRender() {
 }
 
 /* v45: Health sections. In share mode the receiver says which ones this person may see and where they start. */
-const HEALTH_SECS = [['overall', 'Overall'], ['gut', 'Gut'], ['sleep', 'Sleep'], ['medication', 'Medication']];
+const HEALTH_SECS = [['overall', 'Symptoms'], ['gut', 'Gut'], ['sleep', 'Sleep'], ['activity', 'Activity'], ['medication', 'Meds']];
 function healthSections() {
   const ok = SHARE_ID && cfg.share && Array.isArray(cfg.share.sections) ? cfg.share.sections : HEALTH_SECS.map(([k]) => k);
   return HEALTH_SECS.filter(([k]) => ok.includes(k));
@@ -2710,6 +2710,50 @@ function nextDayVerdict(a, b, bName) {
   return d > 0 ? { text: 'Heavier days after ' + bName, tone: 'worse' } : { text: 'Lighter days after ' + bName, tone: 'better' };
 }
 /* Activity: busiest vs quiet days, fatigue 1 and 2 days later. */
+/* v53: Activity section: weekly summary, daily active minutes by effort, minutes by type, steps (Oura, once served),
+   and the Activity patterns popup. */
+const ACT_KINDS = [['walk', 'Walking'], ['dance', 'Dance'], ['aerial', 'Aerial'], ['cycle', 'Cycling'], ['carry', 'Carrying / lifting'], ['other', 'Other']];
+function activityView(T2) {
+  const list = T2.list;
+  const info = infoI('Active minutes are the activities you log (and, once your ring is connected here, Oura’s). Effort: light, moderate or hard, from the effort you give (or the usual for that kind of activity). The top figures compare the last 7 days with the average week in the 4 weeks before.');
+  let html = '<h2 class="tr-h tr-h-first">Activity' + info + '</h2>';
+  if (!list.some((x) => x.d.am || (x.d.oura && x.d.oura.st))) return html + '<p class="small tr-hint">No activity logged yet.</p>';
+  const sum = (arr, f) => arr.reduce((t, x) => t + (f(x) || 0), 0);
+  const last7 = list.slice(-7), prev28 = list.slice(-35, -7);
+  const mins7 = sum(last7, (x) => x.d.am), usual = prev28.length ? sum(prev28, (x) => x.d.am) / 4 : null;
+  const days7 = last7.filter((x) => x.d.am).length, hard7 = sum(last7, (x) => (x.d.ai ? x.d.ai[2] : 0));
+  const diff = usual === null ? '' : Math.abs(mins7 - usual) < 15 ? 'about usual' : Math.round(Math.abs(mins7 - usual)) + ' min ' + (mins7 > usual ? 'more' : 'less') + ' than usual';
+  const tile = (l, v, sub) => '<div class="tr-stat"><span>' + esc(l) + '</span><b>' + esc(v) + '</b><small>' + esc(sub) + '</small></div>';
+  const st7 = last7.map((x) => (x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st : null)).filter((v) => v !== null);
+  html += '<div class="tr-sub">Last 7 days</div><div class="tr-stats">' + tile('Active minutes', String(mins7), diff || 'this week') + tile('Active days', days7 + ' of 7', '') +
+    (st7.length ? tile('Steps a day', Math.round(mean1(st7)).toLocaleString('en-GB'), 'Oura, average') : tile('Hard effort', hard7 + ' min', 'of the ' + mins7)) + '</div>';
+  // Daily bars, stacked by effort.
+  const show = list.slice(-42), n = show.length, W = 360, L = 26, R = 6, H = 150, TOP = 8, B = 18, ch = H - TOP - B, bw = (W - L - R) / n;
+  const max = Math.max(30, Math.max.apply(null, show.map((x) => x.d.am || 0)));
+  const nice = max <= 60 ? 60 : max <= 120 ? 120 : max <= 180 ? 180 : Math.ceil(max / 60) * 60;
+  const Y = (v) => TOP + ch - (v / nice) * ch;
+  let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Active minutes per day, last six weeks">';
+  [0, nice / 2, nice].forEach((v) => { svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v).toFixed(1) + '" y2="' + Y(v).toFixed(1) + '" class="tr-grid"/><text x="' + (L - 4) + '" y="' + (Y(v) + 3).toFixed(1) + '" class="tr-ax" text-anchor="end">' + v + '</text>'; });
+  show.forEach((x, i) => {
+    const x0 = L + i * bw + bw * 0.15, w = Math.max(1.5, bw * 0.7);
+    const parts = x.d.ai ? x.d.ai : x.d.am ? (() => { const r = (x.d.al || 0) / x.d.am; return r >= 2.5 ? [0, 0, x.d.am] : r >= 1.5 ? [0, x.d.am, 0] : [x.d.am, 0, 0]; })() : [0, 0, 0];
+    let base = 0;
+    ['light', 'mod', 'hard'].forEach((c, k) => { const v = parts[k] || 0; if (!v) return; svg += '<rect x="' + x0.toFixed(1) + '" y="' + Y(base + v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (Y(base) - Y(base + v)).toFixed(1) + '" class="tr-actbar ' + c + '"/>'; base += v; });
+    if (keyToDate(x.key).getDay() === 1 && i < n - 2) svg += '<text x="' + (L + i * bw).toFixed(1) + '" y="' + (H - 4) + '" class="tr-ax">' + esc(shortDate(x.key)) + '</text>';
+    const kinds = x.d.ak ? ACT_KINDS.filter(([k]) => x.d.ak[k]).map(([k, l]) => l.toLowerCase() + ' ' + x.d.ak[k] + ' min') : [];
+    const tip = [longDate(x.key), x.d.am ? x.d.am + ' active min' : 'no activity logged', kinds.join(', '), x.d.ai ? ['light', 'moderate', 'hard'].map((l, k) => (x.d.ai[k] ? x.d.ai[k] + ' ' + l : '')).filter(Boolean).join(' · ') : '', x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st.toLocaleString('en-GB') + ' steps' : ''].filter(Boolean).join(' · ');
+    svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (H - B) + '" class="tr-hit" data-tip="' + esc(tip) + '"/>';
+  });
+  html += '<div class="tr-sub">Active minutes a day</div>' + svg + '</svg><div class="tr-key act-key"><span><i class="ak light"></i>Light</span><span><i class="ak mod"></i>Moderate</span><span><i class="ak hard"></i>Hard</span></div>';
+  // Minutes by type over the last 4 weeks.
+  const last28 = list.slice(-28), byKind = ACT_KINDS.map(([k, l]) => [l, sum(last28, (x) => (x.d.ak ? x.d.ak[k] : 0))]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  if (byKind.length) {
+    const top = byKind[0][1];
+    html += '<div class="tr-sub">Last 4 weeks, by type</div><div class="act-types">' + byKind.map(([l, v]) =>
+      '<div class="at-row"><span>' + esc(l) + '</span><i style="width:' + Math.max(4, Math.round((v / top) * 100)) + '%"></i><b>' + (v >= 120 ? (v / 60).toFixed(1).replace('.0', '') + ' h' : v + ' min') + '</b></div>').join('') + '</div>';
+  }
+  return html + patBtn('activity', 'Activity and symptoms');
+}
 /* v51/v52: how activity relates to every symptom. Days are split at the median active minutes (
    or Oura steps once the ring is synced), then each symptom is compared on the same day, the next day or two days
    later. The table is sorted by the size of the difference, so the symptoms that move most come first. */

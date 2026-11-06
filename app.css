@@ -681,8 +681,13 @@ html.share-mode .eyebrow{visibility:hidden}
 .tr-week{stroke:var(--line3);stroke-width:1}
 .tr-band{font-size:8.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;fill:var(--muted2)}
 .tr-actbar.light{fill:#9cc0ec}.tr-actbar.mod{fill:#4a7fd6}.tr-actbar.hard{fill:#1f4e9c}
-.act-key{margin-top:-4px}.act-key .ak{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.act-key{margin-top:6px}.act-key .ak{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .ak.light{background:#9cc0ec}.ak.mod{background:#4a7fd6}.ak.hard{background:#1f4e9c}
 .date-pick{position:relative;padding:0 10px;margin-left:6px;min-width:40px;justify-content:center}
 .date-pick svg{width:16px;height:16px}
 .date-pick{overflow:hidden}
+.act-types{display:flex;flex-direction:column;gap:7px;margin:4px 0 14px}
+.at-row{display:grid;grid-template-columns:118px minmax(0,1fr) 54px;align-items:center;gap:8px;font-size:13.5px}
+.at-row i{display:block;height:10px;border-radius:5px;background:#4a7fd6}
+.at-row b{font-weight:600;text-align:right;font-size:13px}
+.tr-tabs button{font-size:14px;padding:0 4px}
