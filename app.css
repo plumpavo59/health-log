@@ -702,3 +702,6 @@ html.share-mode .eyebrow{visibility:hidden}
 .s-fold summary{list-style:none;cursor:pointer}.s-fold summary::-webkit-details-marker{display:none}
 .s-fold summary h2::after{content:' ›';color:var(--muted2)}.s-fold[open] summary h2::after{content:' ⌄'}
 .s-info p{text-transform:none;letter-spacing:0;font-weight:400;color:var(--muted)}
+.tr-act-area{fill:#4a7fd6;opacity:.22}.tr-act-line{stroke:#4a7fd6;stroke-width:1.4;opacity:.8}
+.tr-extra{align-items:center;margin-top:-4px}.tr-extra-l{font-size:12px;color:var(--muted2);margin-right:2px}
+.tr-marklabel{font-size:8.5px}

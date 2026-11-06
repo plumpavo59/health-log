@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v54 · 6 Nov';
+const APP_VERSION = 'v55 · 6 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2551,10 +2551,14 @@ function trendsRender() {
   // v37: the symptom chart comes first, with a title; the day-by-day calendar follows.
   // v54: stress is a line on the main chart (0–5 shown on the 0–10 scale, so 5 sits at the top), toggled like a symptom.
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS).concat(T2.list.some((x) => giNum(symVal(x.d, 'x'))) ? [{ k: 'x', name: 'Stress', color: '#8a5cc2' }] : []);
-  let over = '<h2 class="tr-h tr-h-first tr-h-main">All symptoms' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Stress (purple) is out of 5, drawn on the same scale so 5 = the top. Under the chart: active minutes per day, shaded by effort (light, moderate, hard).') + '</h2>';
-  over += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
-    '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
-  over += trendsChart(T2) + (T2.list.some((x) => x.d.am) ? '<div class="tr-key act-key"><span><i class="ak light"></i>Light</span><span><i class="ak mod"></i>Moderate</span><span><i class="ak hard"></i>Hard</span><span class="muted">activity effort</span></div>' : '');
+  let over = '<h2 class="tr-h tr-h-first tr-h-main">All symptoms' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Show alongside: Stress (purple dashed; your 0–5 doubled, so 5 = 10) and Activity (light blue bars; 10 = 2 hours or more that day), on the same 0–10 scale so they line up with the symptoms.') + '</h2>';
+  const chip = (s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
+    '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>';
+  const symSeries = series.filter((s) => s.k !== 'x');
+  const extra = series.filter((s) => s.k === 'x').concat(T2.list.some((x) => x.d.am || (x.d.oura && x.d.oura.st)) ? [{ k: 'act', name: 'Activity', color: '#4a7fd6' }] : []);
+  over += '<div class="tr-chips">' + symSeries.map(chip).join('') + '</div>' +
+    (extra.length ? '<div class="tr-chips tr-extra"><span class="tr-extra-l">Show alongside</span>' + extra.map(chip).join('') + '</div>' : '');
+  over += trendsChart(T2);
   over += '<h2 class="tr-h">Day by day' + infoI('Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
   // v45: Health is split into sections with tabs at the top; only the chosen one is drawn.
   const secs = healthSections();
@@ -2633,12 +2637,12 @@ function trendsChart(T2) {
   // v52: active minutes, shaded by how hard (light / moderate / hard, from the logged effort).
   const actOf = (x) => (useSteps ? stepsOf(x) || 0 : x.d.am || 0);
   const effortCls = (x) => { const r = x.d.am ? (x.d.al || 0) / x.d.am : 0; return r >= 2.5 ? ' hard' : r >= 1.5 ? ' mod' : ' light'; };
-  const hasAct = list.some((x) => actOf(x));
-  const BAND = hasAct ? 34 : 0;
+  const hasAct = false;  // v55: activity is now an overlay line (chip "Activity"), not a band
+  const BAND = 0;
   // v44: stress (0–5) sits in its own band right under the chart, on the same days.
   const stressOf = (x) => (giNum(symVal(x.d, 'x')) ? symVal(x.d, 'x') : null);
   const SB = 0;
-  const W = 360, H = 190 + BAND + SB, L = 22, R = 8, TOP = 16, B = 22 + BAND + SB;
+  const W = 360, H = 200 + BAND + SB, L = 22, R = 8, TOP = 28, B = 22 + BAND + SB;
   const n = list.length, cw = W - L - R, ch = H - TOP - B;
   const X = (i) => L + (n > 1 ? (i * cw) / (n - 1) : 0);
   const Y = (v) => TOP + ch - (v / 10) * ch;
@@ -2647,11 +2651,12 @@ function trendsChart(T2) {
   // Faint weekly guides run through the chart and both bands, so a day lines up all the way down.
   list.forEach((x, i) => { if ((n - 1 - i) % 7 === 0) svg += '<line x1="' + X(i).toFixed(1) + '" x2="' + X(i).toFixed(1) + '" y1="' + TOP + '" y2="' + (H - 18) + '" class="tr-week"/>'; });
   list.forEach((x, i) => { if ((n - 1 - i) % 7 === 0 && (i > 2 || i === n - 1)) svg += '<text x="' + X(i) + '" y="' + (H - 6) + '" class="tr-ax" text-anchor="' + (i === n - 1 ? 'end' : 'middle') + '">' + esc(shortDate(x.key)) + '</text>'; });
-  marks.forEach((m) => {
+  // v55: trial starts get their labels on alternating rows above the chart, so neighbours don't overlap.
+  marks.filter((m) => list.some((x) => x.key === m.key)).forEach((m, k) => {
     const i = list.findIndex((x) => x.key === m.key);
-    if (i < 0) return;
-    const right = X(i) > W * 0.55;
-    svg += '<line x1="' + X(i) + '" x2="' + X(i) + '" y1="' + TOP + '" y2="' + (TOP + ch) + '" class="tr-mark"/><text x="' + (X(i) + (right ? -3 : 3)) + '" y="' + (TOP - 4) + '" class="tr-ax" text-anchor="' + (right ? 'end' : 'start') + '">' + esc(m.label) + ' starts</text>';
+    const right = X(i) > W * 0.55, row = k % 2;
+    const label = m.label.length > 26 ? m.label.slice(0, 25) + '…' : m.label;
+    svg += '<line x1="' + X(i) + '" x2="' + X(i) + '" y1="' + (TOP - 12 + row * 10) + '" y2="' + (TOP + ch) + '" class="tr-mark"/><text x="' + (X(i) + (right ? -3 : 3)) + '" y="' + (TOP - 14 + row * 10) + '" class="tr-ax tr-marklabel" text-anchor="' + (right ? 'end' : 'start') + '">' + esc(label) + '</text>';
   });
   const path = (get) => {
     let d = '', pen = false;
@@ -2670,9 +2675,17 @@ function trendsChart(T2) {
     svg += '<path d="' + path(get) + '" fill="none" stroke="' + s.color + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"' + (s.dash ? ' stroke-dasharray="' + s.dash + '"' : '') + '/>' +
       dots(get, '').replace(/class=""/g, 'fill="' + s.color + '"');
   });
+  // v55: activity on the same 0–10 scale: 10 = 2 hours or more of activity that day (or 15,000 steps with Oura).
+  if (TR.on.includes('act')) {
+    const ag = (x) => { const v = actOf(x); return v ? Math.min(10, useSteps ? v / 1500 : v / 12) : 0; };
+    const bw2 = Math.max(2, Math.min(9, (cw / Math.max(1, n - 1)) * 0.7));
+    list.forEach((x, i) => { const v = ag(x); if (v > 0) svg += '<rect x="' + (X(i) - bw2 / 2).toFixed(1) + '" y="' + Y(v).toFixed(1) + '" width="' + bw2.toFixed(1) + '" height="' + (Y(0) - Y(v)).toFixed(1) + '" rx="1" class="tr-act-area"/>'; });
+  }
   if (TR.on.includes('x')) {
     const sg = (x) => (stressOf(x) === null ? undefined : stressOf(x) * 2);
-    svg += '<path d="' + path(sg) + '" fill="none" class="tr-stress-line"/>' + list.map((x, i) => (sg(x) === undefined ? '' : '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(sg(x)).toFixed(1) + '" r="2" class="tr-stressdot"/>')).join('');
+    let sd = '';
+    list.forEach((x, i) => { const v = sg(x); if (v !== undefined) sd += (sd ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); });
+    svg += '<path d="' + sd + '" fill="none" class="tr-stress-line"/>' + list.map((x, i) => (sg(x) === undefined ? '' : '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(sg(x)).toFixed(1) + '" r="2" class="tr-stressdot"/>')).join('');
   }
   // 7-day average of the day score (needs 3+ scored days in the window).
   const full = T2.list, off = full.length - list.length;
