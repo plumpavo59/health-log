@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v56 · 6 Nov';
+const APP_VERSION = 'v57 · 6 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -493,33 +493,44 @@ function planHtml(today, withCompare, listInPopup) {
   return svg + key + (cfg.plan.note ? '<p class="small">' + esc(cfg.plan.note) + '</p>' : '') + (withCompare ? patBtn('steps', 'Compare steps') : '') + listHtml;
 }
 /* v38: symptoms since the current step started vs the 4 weeks before it. */
-function trialEffect(T2, today) {
-  const st = planSteps().find((x) => stepState(x, today) === 'now');
+// v57: any step (index into planSteps), compared with the 4 weeks before it started; default = the current step.
+function trialEffect(T2, today, si) {
+  const steps = planSteps();
+  const st = si === undefined ? steps.find((x) => stepState(x, today) === 'now') : steps[si];
   if (!st || !T2) return null;
-  const start = st.from, before0 = addDays(start, -28);
-  const since = T2.list.filter((x) => x.key >= start && x.key <= today), before = T2.list.filter((x) => x.key >= before0 && x.key < start);
+  const start = st.from, before0 = addDays(start, -28), end = st.to && st.to < today ? st.to : today;
+  const since = T2.list.filter((x) => x.key >= start && x.key <= end), before = T2.list.filter((x) => x.key >= before0 && x.key < start);
   const rows = TREND_SYMS.map((sm) => ({ name: sm.name, get: (d) => { const v = symVal(d, sm.k); return typeof v === 'number' ? (sm.inv ? 10 - v : v) : null; }, up: !!sm.inv }))
     .concat([{ name: 'Stomach pain', get: (d) => (giNum(symVal(d, 'st')) ? symVal(d, 'st') : null) }, { name: 'Bloating', get: (d) => (giNum(symVal(d, 'b')) ? symVal(d, 'b') : null) },
       { name: 'Sleep quality', get: (d) => (giNum(d.q) ? d.q : null), up: true }]);
   const m = (arr, get) => mean1(arr.map((x) => get(x.d)).filter((v) => typeof v === 'number'));
   const out = rows.map((r) => { const a = m(before, r.get), b = m(since, r.get); return { name: r.name, a, b, up: r.up, d: a !== null && b !== null ? b - a : null }; }).filter((r) => r.a !== null && r.b !== null);
   const da = mean1(before.map((x) => x.load).filter(giNum)), db = mean1(since.map((x) => x.load).filter(giNum));
-  return { st, start, days: dayNum(start, today), rows: out, score: da !== null && db !== null ? { a: da, b: db, d: db - da } : null };
+  return { st, start, end, done: end < today, days: dayNum(start, end), rows: out, score: da !== null && db !== null ? { a: da, b: db, d: db - da } : null };
 }
 const effWord = (r) => { if (Math.abs(r.d) < 0.4) return { text: 'about the same', tone: 'same' }; const better = r.up ? r.d > 0 : r.d < 0; return { text: (r.d > 0 ? '+' : '−') + Math.abs(r.d).toFixed(1) + (better ? ' better' : ' worse'), tone: better ? 'better' : 'worse' }; };
 function trialEffectHtml(T2, today) {
-  const e = trialEffect(T2, today);
+  // v57: one block per step that has started (current first, then finished ones), each with its own popup.
+  const steps = planSteps();
+  return steps.map((st, i) => [st, i]).filter(([st]) => { const k = stepState(st, today); return (k === 'now' || k === 'done') && st.to !== st.from; })
+    .sort((a, b) => (b[0].from > a[0].from ? 1 : -1)).map(([st, i]) => trialEffectBlock(T2, today, i)).join('');
+}
+function trialEffectBlock(T2, today, si) {
+  const e = trialEffect(T2, today, si);
   if (!e || !e.rows.length) return '';
+  const num = (/^(\d+)/.exec(e.st.label) || [])[1], name = e.st.label.replace(/^\d+\s*·\s*/, '');
   const top = e.rows.filter((r) => Math.abs(r.d) >= 0.4).sort((x, y) => Math.abs(y.d) - Math.abs(x.d)).slice(0, 2);
   const tile = (label, r) => { const w = effWord(r); return '<div class="tr-stat"><span>' + esc(label) + '</span><b class="eff-' + w.tone + '">' + esc(w.text === 'about the same' ? 'Same' : w.text.split(' ')[0]) + '</b><small>' + esc(r.a.toFixed(1) + ' → ' + r.b.toFixed(1) + (w.tone === 'same' ? '' : ' · ' + w.text.split(' ')[1])) + '</small></div>'; };
   const tiles = (e.score ? [tile('Day score', Object.assign({ up: false }, e.score))] : []).concat(top.map((r) => tile(r.name, r)));
-  return '<div class="tr-sub">Since ' + esc(shortDate(e.start)) + ' (' + e.days + ' days) vs the 4 weeks before</div><div class="tr-stats">' + tiles.join('') + '</div>' + patBtn('trialfx', 'All symptoms since the trial started');
+  const span = e.done ? shortDate(e.start) + ' – ' + shortDate(e.end) + ' (' + e.days + ' days)' : 'Since ' + shortDate(e.start) + ' (' + e.days + (e.days === 1 ? ' day' : ' days') + ')';
+  return '<h3 class="tr-trial-h">Trial · Step ' + esc(num || '') + ': ' + esc(name) + (e.done ? '' : ' <span class="tr-now">now</span>') + '</h3><div class="tr-sub">' + esc(span) + ' vs the 4 weeks before</div><div class="tr-stats">' + tiles.join('') + '</div>' + patBtn('trialfx:' + si, 'All symptoms: step ' + (num || '') + ' vs before');
 }
-function trialEffectPop(T2, today) {
-  const e = trialEffect(T2, today);
+function trialEffectPop(T2, today, si) {
+  const e = trialEffect(T2, today, si);
   if (!e) return null;
-  return { title: 'Since ' + e.st.label.replace(/^\d+\s*·\s*/, '') + ' started', comps: e.rows.map((r) => { const w = effWord(r); return { title: r.name, left: { label: '4 weeks before', value: r.a.toFixed(1) }, right: { label: 'Since ' + shortDate(e.start), value: r.b.toFixed(1) }, verdict: w.text.charAt(0).toUpperCase() + w.text.slice(1), tone: w.tone }; }),
-    note: 'Daily averages of your readings: ' + shortDate(addDays(e.start, -28)) + ' – ' + shortDate(addDays(e.start, -1)) + ' against ' + shortDate(e.start) + ' – today. Higher is better for mental clarity, mood and sleep quality; lower is better for the rest. Changes under 0.4 count as the same. Other things change too (sleep, activity, stress), so this shows what happened, not what caused it.' };
+  const range = shortDate(e.start) + (e.done ? ' – ' + shortDate(e.end) : ' – today');
+  return { title: 'Step: ' + e.st.label.replace(/^\d+\s*·\s*/, ''), comps: e.rows.map((r) => { const w = effWord(r); return { title: r.name, left: { label: '4 weeks before', value: r.a.toFixed(1) }, right: { label: range, value: r.b.toFixed(1) }, verdict: w.text.charAt(0).toUpperCase() + w.text.slice(1), tone: w.tone }; }),
+    note: 'Daily averages of your readings: ' + shortDate(addDays(e.start, -28)) + ' – ' + shortDate(addDays(e.start, -1)) + ' against ' + range + '. Higher is better for mental clarity, mood and sleep quality; lower is better for the rest. Changes under 0.4 count as the same. Other things change too (sleep, activity, stress), so this shows what happened, not what caused it.' };
 }
 /* v39: the supplement plan from the Meds tab (HealthLog v15e), or just the app's list on older receivers. */
 function suppPlanPop() {
@@ -2580,11 +2591,11 @@ function trendsRender() {
   // v37: the symptom chart comes first, with a title; the day-by-day calendar follows.
   // v54: stress is a line on the main chart (0–5 shown on the 0–10 scale, so 5 sits at the top), toggled like a symptom.
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS).concat(T2.list.some((x) => giNum(symVal(x.d, 'x'))) ? [{ k: 'x', name: 'Stress', color: '#8a5cc2' }] : []);
-  let over = '<h2 class="tr-h tr-h-first tr-h-main">All symptoms' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Show alongside: Stress (purple dashed; your 0–5 doubled, so 5 = 10) and Activity (light blue bars; 10 = 2 hours or more that day), on the same 0–10 scale so they line up with the symptoms.') + '</h2>';
+  let over = '<h2 class="tr-h tr-h-first tr-h-main">All symptoms' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Show alongside: Stress (purple dashed; your 0–5 doubled, so 5 = 10) and Activity (light blue bars: steps that day, 10 = 15,000 steps or more; days without a step count have no bar), on the same 0–10 scale so they line up with the symptoms.') + '</h2>';
   const chip = (s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>';
   const symSeries = series.filter((s) => s.k !== 'x');
-  const extra = series.filter((s) => s.k === 'x').concat(T2.list.some((x) => x.d.am || (x.d.oura && x.d.oura.st)) ? [{ k: 'act', name: 'Activity', color: '#4a7fd6' }] : []);
+  const extra = series.filter((s) => s.k === 'x').concat(T2.list.some((x) => x.d.oura && giNum(x.d.oura.st)) ? [{ k: 'act', name: 'Steps', color: '#4a7fd6' }] : []);
   over += '<div class="tr-chips">' + symSeries.map(chip).join('') + '</div>' +
     (extra.length ? '<div class="tr-chips tr-extra"><span class="tr-extra-l">Show alongside</span>' + extra.map(chip).join('') + '</div>' : '');
   over += trendsChart(T2);
@@ -2594,11 +2605,11 @@ function trendsRender() {
   const sec = curSection(secs);
   let html = secs.length > 1 ? '<nav class="tr-tabs" aria-label="Health sections">' + secs.map(([k, l]) => '<button type="button" data-tr="sec" data-v="' + k + '" aria-pressed="' + (sec === k) + '">' + l + '</button>').join('') + '</nav>' : '';
   html += sec === 'overall' ? over : sec === 'gut' ? stomachView(T2) : sec === 'sleep' ? sleepView(T2) : sec === 'activity' ? activityView(T2)
-    : medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + trialEffectHtml(T2, today) + planHtml(today, today >= COMPARE_FROM, true) : '');
+    : medsView(today) + (planSteps().length ? '<h2 class="tr-h" id="trials">Trials</h2>' + trialEffectHtml(T2, today) + '<h3 class="tr-trial-h">Trial timeline</h3>' + planHtml(today, today >= COMPARE_FROM, true) : '');
   if (SHARE_ID) html += '<p class="small tr-hint">View-only copy of Ru’s health log. It updates by itself.</p>';
   if (TR.pop) {
     const G = giData();
-    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : TR.pop === 'trialfx' ? trialEffectPop(T2, today) : TR.pop === 'suppplan' ? suppPlanPop() : null;
+    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : /^trialfx/.test(TR.pop || '') ? trialEffectPop(T2, today, TR.pop.includes(':') ? Number(TR.pop.split(':')[1]) : undefined) : TR.pop === 'suppplan' ? suppPlanPop() : null;
     html += patternsPopup(pop);
     TR.popFresh = false;
   }
@@ -2704,9 +2715,9 @@ function trendsChart(T2) {
     svg += '<path d="' + path(get) + '" fill="none" stroke="' + s.color + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"' + (s.dash ? ' stroke-dasharray="' + s.dash + '"' : '') + '/>' +
       dots(get, '').replace(/class=""/g, 'fill="' + s.color + '"');
   });
-  // v55: activity on the same 0–10 scale: 10 = 2 hours or more of activity that day (or 15,000 steps with Oura).
+  // v57: activity on the same 0–10 scale = steps that day: 10 = 15,000 steps or more (Apple Health before the ring, Oura after).
   if (TR.on.includes('act')) {
-    const ag = (x) => { const v = actOf(x); return v ? Math.min(10, useSteps ? v / 1500 : v / 12) : 0; };
+    const ag = (x) => { const v = stepsOf(x); return v === null ? 0 : Math.min(10, v / 1500); };
     const bw2 = Math.max(2, Math.min(9, (cw / Math.max(1, n - 1)) * 0.7));
     list.forEach((x, i) => { const v = ag(x); if (v > 0) svg += '<rect x="' + (X(i) - bw2 / 2).toFixed(1) + '" y="' + Y(v).toFixed(1) + '" width="' + bw2.toFixed(1) + '" height="' + (Y(0) - Y(v)).toFixed(1) + '" rx="1" class="tr-act-area"/>'; });
   }
@@ -2820,13 +2831,29 @@ function activityView(T2) {
     let base = 0;
     ['light', 'mod', 'hard'].forEach((c, k) => { const v = parts[k] || 0; if (!v) return; svg += '<rect x="' + x0.toFixed(1) + '" y="' + Y(base + v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (Y(base) - Y(base + v)).toFixed(1) + '" class="tr-actbar ' + c + '"/>'; base += v; });
     if (keyToDate(x.key).getDay() === 1 && i < n - 2) svg += '<text x="' + (L + i * bw).toFixed(1) + '" y="' + (H - 4) + '" class="tr-ax">' + esc(shortDate(x.key)) + '</text>';
-    if (x.key === OURA_FROM) svg += '<line x1="' + (L + i * bw).toFixed(1) + '" x2="' + (L + i * bw).toFixed(1) + '" y1="' + TOP + '" y2="' + (TOP + ch) + '" class="tr-mark"/><text x="' + (L + i * bw - 3).toFixed(1) + '" y="' + (TOP + 8) + '" class="tr-ax" text-anchor="end">Oura ring from here</text>';
+    if (x.key === OURA_FROM) svg += '<line x1="' + (L + i * bw).toFixed(1) + '" x2="' + (L + i * bw).toFixed(1) + '" y1="' + TOP + '" y2="' + (TOP + ch) + '" class="tr-mark"/><text x="' + (L + i * bw - 3).toFixed(1) + '" y="' + (TOP + 8) + '" class="tr-ax" text-anchor="end">Oura tracking</text>';
     const kinds = x.d.ak ? ACT_KINDS.filter(([k]) => x.d.ak[k]).map(([k, l]) => l.toLowerCase() + ' ' + x.d.ak[k] + ' min') : [];
     const tip = [longDate(x.key), x.d.am ? x.d.am + ' active min' : 'no activity logged', kinds.join(', '), x.d.ai ? ['light', 'moderate', 'hard'].map((l, k) => (x.d.ai[k] ? x.d.ai[k] + ' ' + l : '')).filter(Boolean).join(' · ') : '', x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st.toLocaleString('en-GB') + ' steps' : ''].filter(Boolean).join(' · ');
     svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (H - B) + '" class="tr-hit" data-tip="' + esc(tip) + '"/>';
   });
   html += '<div class="tr-sub">Active minutes a day</div>' + svg + '</svg><div class="tr-key act-key"><span><i class="ak light"></i>Light</span><span><i class="ak mod"></i>Moderate</span><span><i class="ak hard"></i>Hard</span></div>';
   // Minutes by type over the last 4 weeks.
+  // v57: steps a day (Apple Health before the ring, Oura from 4 Nov).
+  const stepDays = show.map((x) => (x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st : null));
+  if (stepDays.some((v) => v !== null)) {
+    const smax = Math.max(10000, Math.max.apply(null, stepDays.filter((v) => v !== null)));
+    const snice = Math.ceil(smax / 5000) * 5000, SY = (v) => TOP + ch - (v / snice) * ch;
+    let sv = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Steps per day, last six weeks">';
+    [0, snice / 2, snice].forEach((v) => { sv += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + SY(v).toFixed(1) + '" y2="' + SY(v).toFixed(1) + '" class="tr-grid"/><text x="' + (L - 4) + '" y="' + (SY(v) + 3).toFixed(1) + '" class="tr-ax" text-anchor="end">' + (v ? v / 1000 + 'k' : 0) + '</text>'; });
+    show.forEach((x, i) => {
+      const v = stepDays[i], x0 = L + i * bw + bw * 0.15, w = Math.max(1.5, bw * 0.7);
+      if (v !== null) sv += '<rect x="' + x0.toFixed(1) + '" y="' + SY(v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (SY(0) - SY(v)).toFixed(1) + '" class="st-bar' + (x.d.oura.src === 'apple' ? ' apple' : '') + '"/>';
+      if (keyToDate(x.key).getDay() === 1 && i < n - 2) sv += '<text x="' + (L + i * bw).toFixed(1) + '" y="' + (H - 4) + '" class="tr-ax">' + esc(shortDate(x.key)) + '</text>';
+      if (x.key === OURA_FROM) sv += '<line x1="' + (L + i * bw).toFixed(1) + '" x2="' + (L + i * bw).toFixed(1) + '" y1="' + TOP + '" y2="' + (TOP + ch) + '" class="tr-mark"/>';
+      sv += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (H - B) + '" class="tr-hit" data-tip="' + esc(longDate(x.key) + ' · ' + (v === null ? 'no step count' : v.toLocaleString('en-GB') + ' steps (' + (x.d.oura.src === 'apple' ? 'Apple Health' : 'Oura') + ')')) + '"/>';
+    });
+    html += '<div class="tr-sub">Steps a day</div>' + sv + '</svg><div class="tr-key"><span><i class="ak" style="background:#a9b7cc"></i>Apple Health (phone)</span><span><i class="ak" style="background:#4a7fd6"></i>Oura ring, from 4 Nov</span></div>';
+  }
   // v54: average week over the last 4 weeks, by type.
   const last28 = list.slice(-28), byKind = ACT_KINDS.map(([k, l]) => [l, Math.round(sum(last28, (x) => (x.d.ak ? x.d.ak[k] : 0)) / 4)]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   if (byKind.length) {
@@ -3183,7 +3210,10 @@ function nightOf(d) {
   const hours = bed !== null && woke !== null ? (woke - bed) / 60 : giNum(d.sl) ? d.sl : null;
   let inBed = bedMinutes(d.ib);
   if (inBed !== null && bed !== null && (inBed >= bed || bed - inBed > 6 * 60)) inBed = null;
-  return { bed, woke, up, inBed, hours, q: giNum(d.q) ? d.q : null, z: giNum(d.z) ? d.z : null };
+  // v57: time in bed (into bed → out of bed) and time to fall asleep (into bed → asleep), only when both ends were recorded.
+  const tib = inBed !== null && up !== null && up > inBed ? (up - inBed) / 60 : null;
+  const lat = inBed !== null && bed !== null && bed >= inBed ? bed - inBed : null;
+  return { bed, woke, up, inBed, hours, tib, lat, q: giNum(d.q) ? d.q : null, z: giNum(d.z) ? d.z : null };
 }
 function sleepView(T2) {
   const list = T2.list.slice(-42), n = list.length;
@@ -3200,9 +3230,11 @@ function sleepView(T2) {
   };
   const minsWord = (dm) => { const m = Math.round(Math.abs(dm)); return m < 15 ? 'about usual' : (m >= 60 ? (m / 60).toFixed(1).replace('.0', '') + ' h' : m + ' min') + (dm > 0 ? ' later than usual' : ' earlier than usual'); };
   const numWord = (unit, more, less) => (dv) => (Math.abs(dv) < 0.25 ? 'about usual' : Math.abs(dv).toFixed(1) + unit + ' ' + (dv > 0 ? more : less) + ' than usual');
-  let html = '<h2 class="tr-h">Sleep' + infoI('Each bar is one night, from falling asleep (bottom) up to waking (top); the dashed part above is time in bed before getting up. Colour = sleep quality; grey = not rated. White lines = how disturbed (one per point out of 5). Dashed lines = your usual sleep and waking times (the 4 weeks before the last 7 nights). Naps aren’t included yet.') + '</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
-    stat('Fell asleep', 'bed', clockText, minsWord) +
+  let html = '<h2 class="tr-h">Sleep' + infoI('Each bar is one night, from falling asleep (bottom) up to waking (top); the dashed part above is time in bed before getting up. Colour = sleep quality; grey = not rated. White lines = how disturbed (one per point out of 5). Dashed lines = your usual sleep and waking times (the 4 weeks before the last 7 nights). Time in bed (into bed → out of bed) and time to fall asleep (into bed → asleep) only count nights where both times were recorded. Naps aren’t included in hours asleep.') + '</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
+    stat('Fell asleep at', 'bed', clockText, minsWord) +
     stat('Hours asleep', 'hours', (v) => v.toFixed(1), (dv) => numWord(' h', 'more', 'less')(dv) + (T2.list.slice(-7).some((x) => x.d.np) ? ' · nights only, a nap not counted' : '')) +
+    stat('Time in bed', 'tib', (v) => v.toFixed(1) + ' h', numWord(' h', 'more', 'less')) +
+    stat('Time to fall asleep', 'lat', (v) => Math.round(v) + ' min', (dv) => (Math.abs(dv) < 5 ? 'about usual' : Math.round(Math.abs(dv)) + ' min ' + (dv > 0 ? 'longer' : 'shorter') + ' than usual')) +
     stat('Quality', 'q', (v) => v.toFixed(1) + '/10', numWord('', 'higher', 'lower')) + '</div>';
   // Chart: time runs up from 22:00 (bottom) to 15:00 next day (top).
   const W = 360, L = 34, R = 4, top = 4, H = 250, base = H - 16, lo = 22 * 60, hi = 39 * 60, bw = (W - L - R) / n;
@@ -3235,12 +3267,12 @@ function sleepView(T2) {
   const tipOf = (x, nt) => [longDate(x.key), nt.inBed !== null ? 'into bed ' + x.d.ib : '', x.d.bt ? 'asleep ' + x.d.bt : '', x.d.wk ? 'woke ' + x.d.wk : '', x.d.up ? 'up ' + x.d.up : '',
     nt.hours !== null ? nt.hours.toFixed(1) + ' h' : '', nt.q !== null ? 'quality ' + nt.q + '/10' : '', giNum(x.d.z) ? 'disturbed ' + x.d.z + '/5' : '', x.d.np ? 'nap that day' + (x.d.np > 0 ? ' (~' + x.d.np + ' h)' : '') + ': the night alone may look short' : ''].filter(Boolean);
   // v56: Oura ring from 4 Nov; tap a night for its details.
-  list.forEach((x, i) => { if (x.key === OURA_FROM) svg += '<line x1="' + (L + i * bw).toFixed(1) + '" x2="' + (L + i * bw).toFixed(1) + '" y1="' + top + '" y2="' + base + '" class="tr-mark"/><text x="' + (L + i * bw - 3).toFixed(1) + '" y="' + (top + 8) + '" class="tr-ax" text-anchor="end">Oura ring from here</text>'; });
+  list.forEach((x, i) => { if (x.key === OURA_FROM) svg += '<line x1="' + (L + i * bw).toFixed(1) + '" x2="' + (L + i * bw).toFixed(1) + '" y1="' + (top + 12) + '" y2="' + base + '" class="tr-mark"/><text x="' + (L + i * bw - 3).toFixed(1) + '" y="' + (base - 4) + '" class="tr-ax" text-anchor="end">Oura tracking</text>'; });
   list.forEach((x, i) => { const t = tipOf(x, nights[i]); if (t.length > 1) svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + base + '" class="tr-hit' + (TR.night === x.key ? ' on' : '') + '" data-tr="night" data-v="' + x.key + '" data-tip="' + esc(t.join(' · ')) + '"/>'; });
   svg += '</svg>';
   const sel = TR.night && list.find((x) => x.key === TR.night);
   if (sel) svg += nightDetail(sel);
-  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span>' + (list.some((x) => x.d.np) ? '<span><i class="sl-k sl-napk"></i>Nap that day</span>' : '') + '<span><i class="sl-k sl-lie"></i>In bed, awake (before sleep and after waking)</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual</span></div>' +
+  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span>' + (list.some((x) => x.d.np) ? '<span><i class="sl-k sl-napk"></i>Nap that day</span>' : '') + '<span><i class="sl-k sl-lie"></i>In bed, awake (before sleep and after waking)</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual: fell asleep ' + (uBed !== null ? clockText(uBed) : '–') + ', woke ' + (uWoke !== null ? clockText(uWoke) : '–') + '</span></div>' +
     '' + patBtn('sleep', 'Sleep patterns');
   return html;
 }
