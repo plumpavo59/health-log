@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v53 · 6 Nov';
+const APP_VERSION = 'v54 · 6 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -208,25 +208,26 @@ function settingsRender() {
     '<h2>APPEARANCE</h2><div class="grid3" role="group" aria-label="Appearance">' +
       [['light', 'Light'], ['dark', 'Dark'], ['auto', 'Match device']].map(([v, l]) =>
         '<button type="button" class="seg" data-act="theme" data-v="' + v + '" aria-pressed="' + (t === v) + '">' + l + '</button>').join('') + '</div>' +
-    '<h2>TABS ON THIS DEVICE</h2><div class="chips" role="group" aria-label="Tabs on this device">' + ALL_TABS.map(([k, l]) =>
+    '<h2>TABS ON THIS DEVICE' + sInfo('Hidden tabs don’t load at all, so a slow device (like the e-ink tablet) stays quick. Only this device changes.') + '</h2><div class="chips" role="group" aria-label="Tabs on this device">' + ALL_TABS.map(([k, l]) =>
       '<button type="button" class="chip" data-act="tab-toggle" data-v="' + k + '" aria-pressed="' + tabOn(k) + '"><b>' + l + '</b></button>').join('') + '</div>' +
-      '<p class="small">Hidden tabs don’t load at all, so a slow device (like the e-ink tablet) stays quick. Only this device changes.</p>' +
     '<h2>OPENS ON</h2><div class="chips" role="group" aria-label="Tab this device opens on">' + ALL_TABS.filter(([k]) => tabOn(k)).map(([k, l]) =>
       '<button type="button" class="chip" data-act="start-tab" data-v="' + k + '" aria-pressed="' + (openTab() === k) + '"><b>' + l + '</b></button>').join('') + '</div>' +
     '<h2>THIS DEVICE</h2><div class="notice">' + state +
       '<div class="row2" style="margin-top:10px"><button type="button" class="seg" data-act="pair-open">' + (Conn.paired() ? 'Pair again' : 'Pair this device') + '</button>' +
       (Conn.paired() ? '<button type="button" class="seg" data-act="unpair">' + (unpairArmed ? 'Tap again to unpair' : 'Unpair') + '</button>' : '') + '</div></div>' +
-    (Conn.paired() ? '<h2>PAIRED DEVICES</h2>' + devicesMarkup() : '') +
-    (Conn.paired() ? '<h2>SHARE THE HEALTH PAGE</h2><p class="small">A view-only copy of the Health tab for family or health professionals. Give each person this link and their own password from the health tracker’s <b>Sharing</b> tab (untick Active to stop someone’s access). The tab also shows when each person last looked and for how long. Needs HealthLog v16.</p>' +
+    (Conn.paired() ? '<details class="s-fold"><summary><h2>PAIRED DEVICES' + (devices ? ' · ' + devices.length : '') + '</h2></summary>' + devicesMarkup() + '</details>' : '') +
+    (Conn.paired() ? '<h2>SHARE THE HEALTH PAGE' + sInfo('A view-only copy of the Health tab for family or health professionals. Give each person the link and their own password from the health tracker’s Sharing tab, where you also choose which sections they see and where they start. Untick Active to stop someone’s access. The tab shows when each person last looked and for how long.') + '</h2>' +
       '<div class="row2"><button type="button" class="seg" data-act="share-copy">Copy share link</button></div>' : '') +
     (Conn.paired() ? '<h2>DASHBOARD IDEAS</h2><textarea id="dash-note" class="text-input grow" rows="2" maxlength="2000" placeholder="A change you’d like in this app…" aria-label="Dashboard idea"></textarea>' +
-      '<div class="row2" style="margin-top:8px"><button type="button" class="seg" data-act="dash-note">Send to the backlog</button></div><p class="small">Goes through the inbox as a “Dashboard:” note, then onto the dashboard backlog.</p>' : '') +
-    '<h2>OTHER FILES</h2>' + fileLinks([['Works &amp; Royalties', LINKS.works], ['Inventory', LINKS.inventory], ['Life HQ sheet', LINKS.hqSheet]]) +
-    '<h2>ABOUT</h2><p class="small">Life HQ app ' + esc(APP_VERSION) + '. Each device is paired on its own. Pages show saved copies instantly, then refresh. Health records go straight to your health tracker.</p>' +
+      '<div class="row2" style="margin-top:8px"><button type="button" class="seg" data-act="dash-note">Send to the backlog</button></div>' : '') +
+    '<h2>LINKS</h2>' + fileLinks([['Health tracker', LINKS.healthSheet], ['Life HQ sheet', LINKS.hqSheet], ['Finances', LINKS.moneySheet], ['Works &amp; Royalties', LINKS.works], ['Inventory', LINKS.inventory], ['Todoist', 'https://app.todoist.com/app/today'], ['Health GPT', LINKS.healthGpt], ['Finances GPT', LINKS.moneyGpt]]) +
+    '<h2>ABOUT</h2><p class="small">Life HQ app ' + esc(APP_VERSION) + '.</p>' +
     '<div class="row2"><button type="button" class="seg" data-act="update">Check for update</button><button type="button" class="seg" id="test-celebration" data-act="celebrate">Test celebration</button></div>';
   if (Conn.paired() && devices === null && !devicesError) loadDevices();
 }
 
+/* v54: a small (i) in Settings headings that unfolds its explanation. */
+const sInfo = (text) => '<details class="s-info"><summary aria-label="About this">i</summary><p class="small">' + text + '</p></details>';
 function devicesMarkup() {
   if (devicesError) return '<p class="small">' + esc(devicesError) + '</p>';
   if (!devices) return '<p class="small">Loading…</p>';
@@ -369,7 +370,7 @@ const S = {
   bristol: null, size: null, urgent: false, bowelNote: '',
   meds: [], doses: {}, food: '', time: null, timeOpen: false,
   sheet: null, sheetFresh: false, refreshing: false, inboxText: '', inboxStatus: '', dirty: false,
-  sleepT: { bed: '', wake: '', up: '' },
+  sleepT: { bed: '', wake: '', up: '' }, wakeFlags: {},
   actText: '', actType: null, actMin: null, actEffort: null
 };
 const ACT_TYPES = ['Walk', 'Dance', 'Aerial', 'Cycle', 'Carrying/lifting', 'Other'];
@@ -687,8 +688,11 @@ function checkinView() {
 
 function sleepTimesHtml() {
   return '<div class="sleep-times" role="group" aria-label="Sleep times">' + [['bed', 'Went to sleep'], ['wake', 'Woke'], ['up', 'Got up']].map(([k, l]) =>
-    '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') + '</div>';
+    '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') + '</div>' +
+    // v54: on waking, two yes/no buttons, saved in the check-in's note ("Morning: bad taste on waking: yes").
+    '<div class="wake-flags" role="group" aria-label="On waking">' + WAKE_FLAGS.map(([k, l]) => '<button type="button" class="moment-btn" data-act="wake-flag" data-v="' + k + '" aria-pressed="' + !!S.wakeFlags[k] + '">' + l + '</button>').join('') + '</div>';
 }
+const WAKE_FLAGS = [['taste', 'Bad taste'], ['tinnitus', 'Tinnitus']];
 /* Typing guard: background refreshes (saving, config, the 60 s tick) wait until you leave the text box,
    so the box doesn't lose focus mid-word. Taps you make still re-render straight away, keeping your place. */
 function typingInLog() {
@@ -1197,6 +1201,7 @@ function logAct(el) {
   if (act === 'sheet') { openSheet(v); return; }
   if (act === 'moment-open') { S.moment = v; S.momentNote = ''; openSheet('moment'); return; }
   if (act === 'moment-pick') { S.moment = v; logRender(); return; }
+  if (act === 'wake-flag') { S.wakeFlags[v] = !S.wakeFlags[v]; logRender(); return; }
   if (act === 'moment-pick-ci') { S.moment = S.moment === v ? null : v; logRender(); return; }
   if (act === 'moment-log') {
     if (!MOMENTS.includes(S.moment)) return;
@@ -1346,7 +1351,10 @@ function logAct(el) {
     // Receivers before HealthLog v13 only know "fog" (10 = heavy fog), so send that too until it's updated.
     const sc = Object.assign({}, S.scores);
     if (typeof sc.clarity === 'number') sc.fog = 10 - sc.clarity;
-    commit('checkin', { period, stage, scores: sc, note: S.checkNote.trim(), sleep: times },
+    const flags = period === 'Wake' ? WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).map(([k]) => (k === 'taste' ? 'bad taste on waking: yes' : 'tinnitus on waking: yes')) : [];
+    const ciNote = (flags.length ? 'Morning: ' + flags.join('; ') + (S.checkNote.trim() ? '. ' : '') : '') + S.checkNote.trim();
+    S.wakeFlags = {};
+    commit('checkin', { period, stage, scores: sc, note: ciNote, sleep: times },
       'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : ''), { wake: stage === 'bed', up: stage === 'up' });
     S.scores = {}; S.checkNote = ''; S.moment = null; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
   }
@@ -2298,6 +2306,7 @@ const COMPARE_FROM = '2026-12-01';
 const USUAL_DAYS = 28, USUAL_MIN = 5, MIN_READINGS = 2;
 const SYM_WORSE = 1.0, SYM_MUCH = 2.0, AVG_WORSE = 0.5, AVG_MUCH = 1.25, AVG_BETTER = -0.75;
 const TR = { sec: SHARE_ID ? null : LS.get('trends.sec', null), gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc3', TREND_SYMS.map((x) => x.k)), days: {} };
+if (!LS.get('trends.x1', false)) { if (!TR.on.includes('x')) TR.on.push('x'); LS.set('trends.x1', true); }  // v54: stress line on once
 // Brain fog and headache are off by default now; move anyone still on the old default.
 
 const incSyms = () => TREND_SYMS.filter((x) => TR.inc.includes(x.k));
@@ -2540,8 +2549,9 @@ function trendsRender() {
   if (sel) { const on = episodesOn(sel, today); if (on.length) dayHtml += '<p class="tr-detail ep-day">' + on.map((e) => '<span class="ep-tag">' + esc(e.text) + '</span>').join(' ') + '</p>'; }
 
   // v37: the symptom chart comes first, with a title; the day-by-day calendar follows.
-  const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS);
-  let over = '<h2 class="tr-h tr-h-first tr-h-main">Overall health' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Under the chart, on the same days: stress (0–5) and active minutes per day, shaded by effort (light, moderate, hard).') + '</h2><p class="tr-h-sub">All symptoms, day by day, over the last six weeks</p>';
+  // v54: stress is a line on the main chart (0–5 shown on the 0–10 scale, so 5 sits at the top), toggled like a symptom.
+  const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS).concat(T2.list.some((x) => giNum(symVal(x.d, 'x'))) ? [{ k: 'x', name: 'Stress', color: '#8a5cc2' }] : []);
+  let over = '<h2 class="tr-h tr-h-first tr-h-main">All symptoms' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Stress (purple) is out of 5, drawn on the same scale so 5 = the top. Under the chart: active minutes per day, shaded by effort (light, moderate, hard).') + '</h2>';
   over += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
   over += trendsChart(T2) + (T2.list.some((x) => x.d.am) ? '<div class="tr-key act-key"><span><i class="ak light"></i>Light</span><span><i class="ak mod"></i>Moderate</span><span><i class="ak hard"></i>Hard</span><span class="muted">activity effort</span></div>' : '');
@@ -2627,7 +2637,7 @@ function trendsChart(T2) {
   const BAND = hasAct ? 34 : 0;
   // v44: stress (0–5) sits in its own band right under the chart, on the same days.
   const stressOf = (x) => (giNum(symVal(x.d, 'x')) ? symVal(x.d, 'x') : null);
-  const SB = list.some((x) => stressOf(x) !== null) ? 46 : 0;
+  const SB = 0;
   const W = 360, H = 190 + BAND + SB, L = 22, R = 8, TOP = 16, B = 22 + BAND + SB;
   const n = list.length, cw = W - L - R, ch = H - TOP - B;
   const X = (i) => L + (n > 1 ? (i * cw) / (n - 1) : 0);
@@ -2660,6 +2670,10 @@ function trendsChart(T2) {
     svg += '<path d="' + path(get) + '" fill="none" stroke="' + s.color + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"' + (s.dash ? ' stroke-dasharray="' + s.dash + '"' : '') + '/>' +
       dots(get, '').replace(/class=""/g, 'fill="' + s.color + '"');
   });
+  if (TR.on.includes('x')) {
+    const sg = (x) => (stressOf(x) === null ? undefined : stressOf(x) * 2);
+    svg += '<path d="' + path(sg) + '" fill="none" class="tr-stress-line"/>' + list.map((x, i) => (sg(x) === undefined ? '' : '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(sg(x)).toFixed(1) + '" r="2" class="tr-stressdot"/>')).join('');
+  }
   // 7-day average of the day score (needs 3+ scored days in the window).
   const full = T2.list, off = full.length - list.length;
   const avg7 = list.map((x, i) => { const w = full.slice(Math.max(0, off + i - 6), off + i + 1).map((y) => y.load).filter((v) => typeof v === 'number'); return w.length >= 3 ? w.reduce((a, v) => a + v, 0) / w.length : null; });
@@ -2712,6 +2726,7 @@ function nextDayVerdict(a, b, bName) {
 /* Activity: busiest vs quiet days, fatigue 1 and 2 days later. */
 /* v53: Activity section: weekly summary, daily active minutes by effort, minutes by type, steps (Oura, once served),
    and the Activity patterns popup. */
+const OURA_FROM = '2026-11-04';  // Oura ring worn from here: activity and sleep records are more complete after this.
 const ACT_KINDS = [['walk', 'Walking'], ['dance', 'Dance'], ['aerial', 'Aerial'], ['cycle', 'Cycling'], ['carry', 'Carrying / lifting'], ['other', 'Other']];
 function activityView(T2) {
   const list = T2.list;
@@ -2740,16 +2755,18 @@ function activityView(T2) {
     let base = 0;
     ['light', 'mod', 'hard'].forEach((c, k) => { const v = parts[k] || 0; if (!v) return; svg += '<rect x="' + x0.toFixed(1) + '" y="' + Y(base + v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (Y(base) - Y(base + v)).toFixed(1) + '" class="tr-actbar ' + c + '"/>'; base += v; });
     if (keyToDate(x.key).getDay() === 1 && i < n - 2) svg += '<text x="' + (L + i * bw).toFixed(1) + '" y="' + (H - 4) + '" class="tr-ax">' + esc(shortDate(x.key)) + '</text>';
+    if (x.key === OURA_FROM) svg += '<line x1="' + (L + i * bw).toFixed(1) + '" x2="' + (L + i * bw).toFixed(1) + '" y1="' + TOP + '" y2="' + (TOP + ch) + '" class="tr-mark"/><text x="' + (L + i * bw - 3).toFixed(1) + '" y="' + (TOP + 8) + '" class="tr-ax" text-anchor="end">Oura ring from here</text>';
     const kinds = x.d.ak ? ACT_KINDS.filter(([k]) => x.d.ak[k]).map(([k, l]) => l.toLowerCase() + ' ' + x.d.ak[k] + ' min') : [];
     const tip = [longDate(x.key), x.d.am ? x.d.am + ' active min' : 'no activity logged', kinds.join(', '), x.d.ai ? ['light', 'moderate', 'hard'].map((l, k) => (x.d.ai[k] ? x.d.ai[k] + ' ' + l : '')).filter(Boolean).join(' · ') : '', x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st.toLocaleString('en-GB') + ' steps' : ''].filter(Boolean).join(' · ');
     svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (H - B) + '" class="tr-hit" data-tip="' + esc(tip) + '"/>';
   });
   html += '<div class="tr-sub">Active minutes a day</div>' + svg + '</svg><div class="tr-key act-key"><span><i class="ak light"></i>Light</span><span><i class="ak mod"></i>Moderate</span><span><i class="ak hard"></i>Hard</span></div>';
   // Minutes by type over the last 4 weeks.
-  const last28 = list.slice(-28), byKind = ACT_KINDS.map(([k, l]) => [l, sum(last28, (x) => (x.d.ak ? x.d.ak[k] : 0))]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  // v54: average week over the last 4 weeks, by type.
+  const last28 = list.slice(-28), byKind = ACT_KINDS.map(([k, l]) => [l, Math.round(sum(last28, (x) => (x.d.ak ? x.d.ak[k] : 0)) / 4)]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   if (byKind.length) {
     const top = byKind[0][1];
-    html += '<div class="tr-sub">Last 4 weeks, by type</div><div class="act-types">' + byKind.map(([l, v]) =>
+    html += '<div class="tr-sub">Average week, by type (last 4 weeks)</div><div class="act-types">' + byKind.map(([l, v]) =>
       '<div class="at-row"><span>' + esc(l) + '</span><i style="width:' + Math.max(4, Math.round((v / top) * 100)) + '%"></i><b>' + (v >= 120 ? (v / 60).toFixed(1).replace('.0', '') + ' h' : v + ' min') + '</b></div>').join('') + '</div>';
   }
   return html + patBtn('activity', 'Activity and symptoms');
@@ -3123,7 +3140,7 @@ function sleepView(T2) {
     stat('Hours asleep', 'hours', (v) => v.toFixed(1), (dv) => numWord(' h', 'more', 'less')(dv) + (T2.list.slice(-7).some((x) => x.d.np) ? ' · nights only, a nap not counted' : '')) +
     stat('Quality', 'q', (v) => v.toFixed(1) + '/10', numWord('', 'higher', 'lower')) + '</div>';
   // Chart: time runs up from 22:00 (bottom) to 15:00 next day (top).
-  const W = 360, L = 34, R = 4, top = 4, H = 180, base = H - 16, lo = 22 * 60, hi = 39 * 60, bw = (W - L - R) / n;
+  const W = 360, L = 34, R = 4, top = 4, H = 250, base = H - 16, lo = 22 * 60, hi = 39 * 60, bw = (W - L - R) / n;
   const y = (m) => base - ((Math.min(Math.max(m, lo), hi) - lo) / (hi - lo)) * (base - top);
   let svg = '<svg class="tr-chart sleep-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Sleep window per night, last six weeks">';
   [[24 * 60, '00:00'], [27 * 60, '03:00'], [30 * 60, '06:00'], [33 * 60, '09:00'], [36 * 60, '12:00'], [39 * 60, '15:00']].forEach(([m, t]) => {
