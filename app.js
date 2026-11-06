@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v58 · 6 Nov';
+const APP_VERSION = 'v59 · 6 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2815,9 +2815,14 @@ function activityView(T2) {
   const days7 = last7.filter((x) => x.d.am).length, hard7 = sum(last7, (x) => (x.d.ai ? x.d.ai[2] : 0));
   const diff = usual === null ? '' : Math.abs(mins7 - usual) < 15 ? 'about usual' : Math.round(Math.abs(mins7 - usual)) + ' min ' + (mins7 > usual ? 'more' : 'less') + ' than usual';
   const tile = (l, v, sub) => '<div class="tr-stat"><span>' + esc(l) + '</span><b>' + esc(v) + '</b><small>' + esc(sub) + '</small></div>';
-  const st7 = last7.map((x) => (x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st : null)).filter((v) => v !== null);
+  // v59: steps average from every source (phone before 4 Nov, ring after), over the last 7 finished days
+  // (today's count is still growing), compared with the 4 weeks before.
+  const stOf = (x) => (x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st : null);
+  const done = list.length && list[list.length - 1].key === T2.today ? list.slice(0, -1) : list;
+  const st7 = done.slice(-7).map(stOf).filter((v) => v !== null), stPrev = done.slice(-35, -7).map(stOf).filter((v) => v !== null);
+  const stSub = st7.length < 3 ? '' : stPrev.length >= 7 ? 'usual ' + (Math.round(mean1(stPrev) / 100) * 100).toLocaleString('en-GB') : 'last 7 full days';
   html += '<div class="tr-sub">Last 7 days</div><div class="tr-stats">' + tile('Active minutes', String(mins7), diff || 'this week') + tile('Active days', days7 + ' of 7', '') +
-    (st7.length ? tile('Steps a day', Math.round(mean1(st7)).toLocaleString('en-GB'), 'Oura, average') : tile('Hard effort', hard7 + ' min', 'of the ' + mins7)) + '</div>';
+    (st7.length >= 3 ? tile('Steps a day', (Math.round(mean1(st7) / 100) * 100).toLocaleString('en-GB'), stSub) : tile('Hard effort', hard7 + ' min', 'of the ' + mins7)) + '</div>';
   // Daily bars, stacked by effort.
   const show = list.slice(-42), n = show.length, W = 360, L = 26, R = 6, H = 150, TOP = 8, B = 18, ch = H - TOP - B, bw = (W - L - R) / n;
   const max = Math.max(30, Math.max.apply(null, show.map((x) => x.d.am || 0)));
