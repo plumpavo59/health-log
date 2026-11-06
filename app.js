@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v50 · 3 Nov';
+const APP_VERSION = 'v51 · 6 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2205,12 +2205,12 @@ function completionPop() {
     });
   } catch (e) {}
 }
-const CELEBRATION = { figures: ['Dean Gaffney', 'Les Dennis', 'Rustie Lee', 'Cheryl Baker', 'Timmy Mallett', 'Pat Sharp', 'Christopher Biggins', 'Su Pollard', 'Keith Chegwin', 'Chico Slimani', 'Paul Chuckle', 'Michelle McManus', 'Cecilia Payne-Gaposchkin', 'Satyendra Nath Bose', 'Emmy Noether', 'Lise Meitner', 'George Green', 'Oliver Heaviside', 'Caroline Herschel', 'Wendy Cope', 'Ivor Cutler', 'Stevie Smith', 'Edith Sitwell', 'Hilaire Belloc', 'Nina Blenkinsop, first woman to sharpen a pencil in an imaginary Russia', 'Dr Clive Widdershins, visiting professor of almost', 'Maureen Crumb, deputy inventor of Thursday', 'Yuri Spatula, runner-up in the 1974 indoor horizon trials', 'Doreen Puddle, poet laureate of a lay-by', 'Professor Len Fidget, discoverer of the third elbow', 'Valentina Plonk, honorary custodian of the spare moon', 'Gareth Bunting, regional semaphore understudy', 'Dr Enid Biscuit, chair of applied hesitation', 'Ronald Sprocket, Britain\'s seventh-most promising cloud', 'Beryl Quince, first person to alphabetise a fog'],
-  openings: ['Let x be courage', 'If hope equals soup', 'Assume a spherical biscuit', 'Let doubt approach zero', 'When effort meets a duck', 'If destiny wears slippers', 'Let triumph be triangular', 'Given one heroic wobble'],
-  middles: ['multiply by jazz', 'divide doubt by toast', 'carry the imaginary pigeon', 'subtract the spare Tuesday', 'factorise your trousers', 'differentiate the teapot', 'square the tiny victory', 'solve for mild thunder'],
-  endings: ['and proceed diagonally.', 'QED, darling.', 'the crumpet is yours.', 'hence, magnificent.', 'and call it progress.', 'the ducks approve.', 'therefore, onwards.', 'one less thing.'] };
+// v51: short one-line quotes and short names.
+const CELEBRATION = { figures: ['Dean Gaffney', 'Les Dennis', 'Rustie Lee', 'Cheryl Baker', 'Timmy Mallett', 'Pat Sharp', 'Su Pollard', 'Keith Chegwin', 'Paul Chuckle', 'Emmy Noether', 'Lise Meitner', 'Oliver Heaviside', 'Caroline Herschel', 'Wendy Cope', 'Ivor Cutler', 'Stevie Smith', 'Maureen Crumb', 'Yuri Spatula', 'Doreen Puddle', 'Prof. Len Fidget', 'Dr Enid Biscuit', 'Beryl Quince'],
+  lines: ['Assume a spherical biscuit.', 'Carry the imaginary pigeon.', 'Hence, magnificent.', 'QED, darling.', 'The crumpet is yours.', 'The ducks approve.', 'Therefore, onwards.', 'One less thing.', 'Square the tiny victory.', 'Solve for mild thunder.', 'Proceed diagonally.', 'Factorise your trousers.', 'Done is a vibe.', 'Tick. Tock. Ticked.', 'Small win, big hat.', 'Let triumph be triangular.'] };
 let lastRewardFigure = '';
 function closeReward() {
+  clearTimeout(rewardTimer);
   const id = $('reward').dataset.task;
   $('reward').hidden = true; $('reward').replaceChildren(); $('reward').dataset.task = '';
   if (id && pendingDone[id]) pendingDone[id].send();
@@ -2235,7 +2235,7 @@ function celebrateCompletion(taskId) {
   close.onclick = (e) => { e.preventDefault(); e.stopPropagation(); closeReward(); };
   const mark = document.createElement('span'); mark.className = 'reward-mark'; mark.textContent = '✓'; mark.setAttribute('aria-hidden', 'true');
   const caption = document.createElement('div'); caption.className = 'reward-caption';
-  caption.textContent = '“' + pick(CELEBRATION.openings) + ', ' + pick(CELEBRATION.middles) + ', ' + pick(CELEBRATION.endings) + '”';
+  caption.textContent = '“' + pick(CELEBRATION.lines) + '”';
   const attribution = document.createElement('div'); attribution.className = 'reward-attribution'; attribution.textContent = '— ' + figure;
   card.append(close, mark, caption, attribution);
   $('reward').dataset.task = taskId || '';
@@ -2256,7 +2256,10 @@ function celebrateCompletion(taskId) {
     }
   }
   reward.hidden = false;
+  // v51: closes by itself after 5 seconds (the task is sent then, unless Undo was pressed).
+  clearTimeout(rewardTimer); rewardTimer = setTimeout(() => { if (!$('reward').hidden) closeReward(); }, 5000);
 }
+let rewardTimer = 0;
 
 /* ================= HEALTH view (internal key "trends") =================
    Symptom history from Health tracker › Events, via the receiver's "config" answer.
@@ -2524,10 +2527,10 @@ function trendsRender() {
 
   // v37: the symptom chart comes first, with a title; the day-by-day calendar follows.
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS);
-  let over = '<h2 class="tr-h tr-h-first tr-h-main">Overall health' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Under the chart: stress (0–5, “str”) and activity bars, on the same days.') + '</h2><p class="tr-h-sub">All symptoms, day by day, over the last six weeks</p>';
+  let over = '<h2 class="tr-h tr-h-first tr-h-main">Overall health' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Under the chart, on the same days: stress (0–5) and activity (Oura steps once synced, otherwise the activity you log).') + '</h2><p class="tr-h-sub">All symptoms, day by day, over the last six weeks</p>';
   over += '<div class="tr-chips">' + series.map((s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>').join('') + '</div>';
-  over += trendsChart(T2) + (T2.list.some((x) => x.d.al) ? patBtn('activity', 'Activity patterns') : '');
+  over += trendsChart(T2) + (T2.list.some((x) => x.d.al || (x.d.oura && x.d.oura.st)) ? patBtn('activity', 'Activity patterns') : '');
   over += '<h2 class="tr-h">Day by day' + infoI('Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
   // v45: Health is split into sections with tabs at the top; only the chosen one is drawn.
   const secs = healthSections();
@@ -2600,17 +2603,23 @@ function trendsChart(T2) {
   const recent42 = T2.list.slice(-42);
   const firstData = recent42.findIndex((x) => x.load !== null);
   const list = recent42.slice(Math.max(0, Math.min(firstData < 0 ? 0 : firstData, recent42.length - 14)));
-  const hasAct = list.some((x) => x.d.al);
-  const BAND = hasAct ? 30 : 0;
+  // v51: the activity band shows Oura steps once the ring is synced, otherwise logged activity.
+  const stepsOf = (x) => (x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st : null);
+  const useSteps = list.some((x) => stepsOf(x) !== null);
+  const actOf = (x) => (useSteps ? stepsOf(x) || 0 : x.d.al || 0);
+  const hasAct = list.some((x) => actOf(x));
+  const BAND = hasAct ? 34 : 0;
   // v44: stress (0–5) sits in its own band right under the chart, on the same days.
   const stressOf = (x) => (giNum(symVal(x.d, 'x')) ? symVal(x.d, 'x') : null);
-  const SB = list.some((x) => stressOf(x) !== null) ? 34 : 0;
+  const SB = list.some((x) => stressOf(x) !== null) ? 46 : 0;
   const W = 360, H = 190 + BAND + SB, L = 22, R = 8, TOP = 16, B = 22 + BAND + SB;
   const n = list.length, cw = W - L - R, ch = H - TOP - B;
   const X = (i) => L + (n > 1 ? (i * cw) / (n - 1) : 0);
   const Y = (v) => TOP + ch - (v / 10) * ch;
   let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Daily symptom scores over the last six weeks">';
   for (let v = 0; v <= 10; v += 2) svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" class="tr-grid"/><text x="' + (L - 5) + '" y="' + (Y(v) + 3.5) + '" class="tr-ax" text-anchor="end">' + v + '</text>';
+  // Faint weekly guides run through the chart and both bands, so a day lines up all the way down.
+  list.forEach((x, i) => { if ((n - 1 - i) % 7 === 0) svg += '<line x1="' + X(i).toFixed(1) + '" x2="' + X(i).toFixed(1) + '" y1="' + TOP + '" y2="' + (H - 18) + '" class="tr-week"/>'; });
   list.forEach((x, i) => { if ((n - 1 - i) % 7 === 0 && (i > 2 || i === n - 1)) svg += '<text x="' + X(i) + '" y="' + (H - 6) + '" class="tr-ax" text-anchor="' + (i === n - 1 ? 'end' : 'middle') + '">' + esc(shortDate(x.key)) + '</text>'; });
   marks.forEach((m) => {
     const i = list.findIndex((x) => x.key === m.key);
@@ -2645,28 +2654,29 @@ function trendsChart(T2) {
     list.forEach((x, i) => { if ((x.flare || x.badDay) && x.load !== null) svg += '<circle cx="' + X(i) + '" cy="' + Y(x.load) + '" r="3.6" class="tr-flaredot' + (x.flare ? '' : ' ring') + '"/>'; });
   }
   if (SB) {
-    const top = TOP + ch + 10, hgt = SB - 12, sy = (v) => top + hgt - (v / 5) * hgt;
-    svg += '<text x="' + (L - 5) + '" y="' + (top + hgt / 2 + 3) + '" class="tr-ax" text-anchor="end">str</text><line x1="' + L + '" x2="' + (W - R) + '" y1="' + (top + hgt) + '" y2="' + (top + hgt) + '" class="tr-grid"/><line x1="' + L + '" x2="' + (W - R) + '" y1="' + top + '" y2="' + top + '" class="tr-grid"/>';
+    const top = TOP + ch + 20, hgt = SB - 22, sy = (v) => top + hgt - (v / 5) * hgt;
+    svg += '<text x="' + (L + 2) + '" y="' + (top - 2) + '" class="tr-band">Stress · 0–5</text><text x="' + (L - 5) + '" y="' + (top + 3.5) + '" class="tr-ax" text-anchor="end">5</text><line x1="' + L + '" x2="' + (W - R) + '" y1="' + (top + hgt) + '" y2="' + (top + hgt) + '" class="tr-grid"/><line x1="' + L + '" x2="' + (W - R) + '" y1="' + top + '" y2="' + top + '" class="tr-grid"/>';
     let d = '', pen = false;
     list.forEach((x, i) => { const v = stressOf(x); if (v === null) return; d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + sy(v).toFixed(1); pen = true; });
     svg += '<path d="' + d + '" fill="none" class="tr-stress"/>' + list.map((x, i) => { const v = stressOf(x); return v === null ? '' : '<circle cx="' + X(i).toFixed(1) + '" cy="' + sy(v).toFixed(1) + '" r="1.9" class="tr-stressdot"/>'; }).join('');
   }
   // Activity load as thin bars under the chart, on the same days.
   if (hasAct) {
-    const max = Math.max.apply(null, list.map((x) => x.d.al || 0));
-    const top = TOP + ch + 8 + SB, hgt = BAND - 10, bwid = Math.max(2, Math.min(8, (cw / Math.max(1, n - 1)) * 0.6));
-    svg += '<text x="' + (L - 5) + '" y="' + (top + hgt - 2) + '" class="tr-ax" text-anchor="end">act</text><line x1="' + L + '" x2="' + (W - R) + '" y1="' + (top + hgt) + '" y2="' + (top + hgt) + '" class="tr-grid"/>';
+    const max = Math.max.apply(null, list.map(actOf));
+    const top = TOP + ch + 12 + SB, hgt = BAND - 14, bwid = Math.max(2, Math.min(8, (cw / Math.max(1, n - 1)) * 0.6));
+    svg += '<text x="' + (L + 2) + '" y="' + (top - 2) + '" class="tr-band">' + (useSteps ? 'Steps (Oura)' : 'Activity logged') + '</text><line x1="' + L + '" x2="' + (W - R) + '" y1="' + (top + hgt) + '" y2="' + (top + hgt) + '" class="tr-grid"/>';
     list.forEach((x, i) => {
-      if (!x.d.al) return;
-      const h = Math.max(1.5, (x.d.al / max) * hgt);
-      svg += '<rect x="' + (X(i) - bwid / 2).toFixed(1) + '" y="' + (top + hgt - h).toFixed(1) + '" width="' + bwid.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1" class="tr-actbar"><title>' + esc(longDate(x.key)) + ': ' + x.d.am + ' min active</title></rect>';
+      const v = actOf(x);
+      if (!v) return;
+      const h = Math.max(1.5, (v / max) * hgt);
+      svg += '<rect x="' + (X(i) - bwid / 2).toFixed(1) + '" y="' + (top + hgt - h).toFixed(1) + '" width="' + bwid.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1" class="tr-actbar"/>';
     });
   }
   // Hover / tap areas, one per day.
   const colW = n > 1 ? cw / (n - 1) : cw;
   list.forEach((x, i) => {
     const vals = TREND_SYMS.filter((sm) => typeof symVal(x.d, sm.k) === 'number').map((sm) => sm.name.toLowerCase() + ' ' + (sm.inv ? Math.round((10 - symVal(x.d, sm.k)) * 10) / 10 : symVal(x.d, sm.k)));
-    const tip = [longDate(x.key), x.load !== null ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') : 'no scores', avg7[i] !== null ? '7-day average ' + avg7[i].toFixed(1) : '', x.flare ? 'flare' : x.badDay ? 'bad day' : '', vals.join(', '), stressOf(x) !== null ? 'stress ' + stressOf(x) + '/5' : '', x.d.am ? x.d.am + ' min active' : ''].filter(Boolean).join(' · ');
+    const tip = [longDate(x.key), x.load !== null ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') : 'no scores', avg7[i] !== null ? '7-day average ' + avg7[i].toFixed(1) : '', x.flare ? 'flare' : x.badDay ? 'bad day' : '', vals.join(', '), stressOf(x) !== null ? 'stress ' + stressOf(x) + '/5' : '', stepsOf(x) !== null ? stepsOf(x).toLocaleString('en-GB') + ' steps' : '', x.d.am ? x.d.am + ' min activity logged' : ''].filter(Boolean).join(' · ');
     svg += '<rect x="' + Math.max(L, X(i) - colW / 2).toFixed(1) + '" y="' + TOP + '" width="' + colW.toFixed(1) + '" height="' + (H - TOP - 10) + '" class="tr-hit" data-tip="' + esc(tip) + '"/>';
   });
   return svg + '</svg>';
@@ -2684,25 +2694,51 @@ function nextDayVerdict(a, b, bName) {
   return d > 0 ? { text: 'Heavier days after ' + bName, tone: 'worse' } : { text: 'Lighter days after ' + bName, tone: 'better' };
 }
 /* Activity: busiest vs quiet days, fatigue 1 and 2 days later. */
+/* v51: how activity relates to every symptom. Days are split at the median activity load (minutes × effort,
+   or Oura steps once the ring is synced), then each symptom is compared on the same day, the next day or two days
+   later. The table is sorted by the size of the difference, so the symptoms that move most come first. */
 function activityPatterns(T2) {
   const list = T2.list;
-  if (!list.some((x) => x.d.al)) return null;
-  const fat = (x) => (x ? symVal(x.d, 'f') : undefined);
+  const steps = (x) => (x && x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st : null);
+  const useSteps = list.filter((x) => steps(x) !== null).length >= 14;
+  const act = (x) => (useSteps ? steps(x) : x.d.al || 0);
+  const firstLog = list.findIndex((x) => (useSteps ? steps(x) !== null : x.d.al));
+  if (firstLog < 0) return null;
+  const days = list.slice(firstLog);
+  const lag = [0, 1, 2].includes(TR.actLag) ? TR.actLag : 1;
+  const SYMS = TREND_SYMS.map((sm) => ({ name: sm.name, get: (x) => symVal(x.d, sm.k), inv: sm.inv }))
+    .concat([{ name: 'Stomach pain', get: (x) => (giNum(symVal(x.d, 'st')) ? symVal(x.d, 'st') : null) }, { name: 'Bloating', get: (x) => (giNum(symVal(x.d, 'b')) ? symVal(x.d, 'b') : null) },
+      { name: 'Sleep quality (that night)', get: (x) => (giNum(x.d.q) ? 10 - x.d.q : null), inv: true, nightOf: true }, { name: 'Stress', get: (x) => (giNum(symVal(x.d, 'x')) ? symVal(x.d, 'x') * 2 : null), scale: 0.5 }]);
+  const vals = days.map(act).filter((v) => v !== null).sort((a, b) => a - b);
+  const median = vals.length ? vals[Math.floor(vals.length / 2)] : 0;
+  const busy = (x) => act(x) !== null && act(x) > median, quiet = (x) => act(x) !== null && act(x) <= median;
   const idx = {}; list.forEach((x, i) => { idx[x.key] = i; });
-  const active = list.filter((x) => x.d.al).sort((a, b) => b.d.al - a.d.al).slice(0, 5);
-  const quiet = list.filter((x) => !x.d.al && x.load !== null).slice(-5);
-  const after = (days, lag) => { const v = days.map((x) => fat(list[idx[x.key] + lag])).filter((y) => typeof y === 'number'); return v.length ? { m: mean1(v), n: v.length } : null; };
+  const rows = SYMS.map((sm) => {
+    // "That night" sleep is stored on the next morning's day.
+    const target = (x) => list[idx[x.key] + lag + (sm.nightOf ? 1 : 0)];
+    const pick = (f) => days.filter(f).map((x) => { const t = target(x); return t ? sm.get(t) : null; }).filter((v) => typeof v === 'number');
+    const b = pick(busy), q = pick(quiet);
+    if (b.length < 4 || q.length < 4) return null;
+    const mb = mean1(b), mq = mean1(q), sc = sm.scale || 1;
+    const shown = (v) => ((sm.inv ? 10 - v : v) * sc).toFixed(1);
+    return { name: sm.name, q: shown(mq), b: shown(mb), d: (mb - mq) * sc, n: Math.min(b.length, q.length) };
+  }).filter(Boolean).sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
+  const lagWord = ['the same day', 'the next day', 'two days later'][lag];
   const week = list.slice(-7).reduce((t, x) => t + (x.d.am || 0), 0);
   const p = { title: 'Activity patterns', stats: [{ label: 'Active, last 7 days', value: week + ' min' }], comps: [] };
-  [[1, 'Fatigue the next day'], [2, 'Fatigue two days later']].forEach(([lag, title]) => {
-    const a = after(active, lag), q = after(quiet, lag);
-    if (!a || !q || a.n < 3 || q.n < 3) return;
-    const d = a.m - q.m;
-    p.comps.push({ title, left: { label: 'After quiet days', value: q.m.toFixed(1), sub: q.n + ' days' }, right: { label: 'After your busiest days', value: a.m.toFixed(1), sub: a.n + ' days' },
-      verdict: Math.abs(d) < 0.4 ? 'No clear difference yet' : d > 0 ? 'More tired after busy days' : 'Less tired after busy days', tone: Math.abs(d) < 0.4 ? 'same' : d > 0 ? 'worse' : 'better' });
-  });
-  if (!p.comps.length) p.empty = 'A few more logged days and this will compare busy and quiet days with fatigue afterwards.';
-  p.note = 'Busiest = the 5 days with the most activity (minutes × effort). Quiet = recent days with none logged.';
+  const st7 = list.slice(-7).map(steps).filter((v) => v !== null);
+  if (st7.length) p.stats.push({ label: 'Steps, 7-day average', value: Math.round(mean1(st7)).toLocaleString('en-GB') });
+  let h = '<div class="tr-chips tr-lag">' + [[0, 'Same day'], [1, 'Next day'], [2, '2 days later']].map(([k, l]) => '<button type="button" class="tr-chip" data-tr="actlag" data-v="' + k + '" aria-pressed="' + (lag === k) + '">' + l + '</button>').join('') + '</div>';
+  if (!rows.length) { p.empty = 'A few more days of activity and check-ins and this will compare busier and quieter days for each symptom.'; p.html = h; return p; }
+  const top = rows.filter((r) => Math.abs(r.d) >= 0.5).slice(0, 2);
+  const word = (r) => (r.d > 0 ? 'worse' : 'better');
+  h += '<p class="pt-lead">' + (top.length ? 'Biggest difference ' + lagWord + ': <b>' + top.map((r) => esc(r.name.toLowerCase()) + ' ' + Math.abs(r.d).toFixed(1) + ' ' + word(r)).join('</b> and <b>') + '</b> after busier days.' : 'No symptom differs by half a point or more ' + lagWord + ' between busier and quieter days so far.') + '</p>';
+  h += '<table class="pt-table"><thead><tr><th>' + esc(lagWord.charAt(0).toUpperCase() + lagWord.slice(1)) + '</th><th>After quieter</th><th>After busier</th><th></th></tr></thead><tbody>' + rows.map((r) => {
+    const tone = Math.abs(r.d) < 0.5 ? 'same' : r.d > 0 ? 'worse' : 'better';
+    return '<tr class="' + tone + (top.includes(r) ? ' top' : '') + '"><td>' + esc(r.name) + '</td><td>' + r.q + '</td><td>' + r.b + '</td><td>' + (tone === 'same' ? '≈' : (r.d > 0 ? '▲ ' : '▼ ') + Math.abs(r.d).toFixed(1) + (tone === 'worse' ? ' worse' : ' better')) + '</td></tr>';
+  }).join('') + '</tbody></table>';
+  p.html = h;
+  p.note = 'Busier = days above your middle (median) amount of ' + (useSteps ? 'steps (Oura)' : 'logged activity (minutes × effort)') + '; quieter = the rest. Differences under half a point count as the same. Stress is shown out of 5. Other things change too (sleep, stress, food), so this shows patterns, not causes.';
   return p;
 }
 function patternsHtml(p) {
@@ -3143,6 +3179,7 @@ function trendsClick(ev) {
   else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
   else if (act === 'medrow') { TR.medOpen = TR.medOpen === v ? null : v; trendsRender(); }
   else if (act === 'gi') { TR.gi = v; LS.set('trends.gi2', v); trendsRender(); }
+  else if (act === 'actlag') { TR.actLag = Number(v); trendsRender(); }
   else if (act === 'sec') { TR.sec = v; TR.pop = null; LS.set('trends.sec', v); trendsRender(); const tabs = document.querySelector('.tr-tabs'); if (tabs && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView(); }
   else if (act === 'pat-close') closePatterns();
   else if (act === 'pair') openSettings('pair');

@@ -669,3 +669,14 @@ html.share-mode .eyebrow{visibility:hidden}
 .recent-toggle{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;border:0;background:transparent;color:inherit;padding:6px 0;min-height:40px;font:inherit}
 .recent-toggle h2{margin:0}.recent-toggle .rc-n{font-weight:500;color:var(--muted)}
 .recent-toggle svg{transition:transform .15s;color:var(--muted)}.recent-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
+.tr-lag{justify-content:center;margin:2px 0 10px}
+.pt-lead{font-size:14.5px;line-height:1.45;margin:4px 0 10px}
+.pt-table{width:100%;border-collapse:collapse;font-size:13.5px}
+.pt-table th{font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted2);text-align:right;padding:6px 4px;border-bottom:1px solid var(--line)}
+.pt-table th:first-child,.pt-table td:first-child{text-align:left}
+.pt-table td{padding:7px 4px;border-bottom:1px solid var(--line3);text-align:right;white-space:nowrap}
+.pt-table td:first-child{white-space:normal}
+.pt-table tr.worse td:last-child{color:#c8463f}.pt-table tr.better td:last-child{color:#2f8a4c}.pt-table tr.same td:last-child{color:var(--muted2)}
+.pt-table tr.top td{font-weight:650}
+.tr-week{stroke:var(--line3);stroke-width:1}
+.tr-band{font-size:8.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;fill:var(--muted2)}
