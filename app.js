@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v60 · 6 Nov';
+const APP_VERSION = 'v61 · 6 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2806,7 +2806,7 @@ function nightDetail(x) {
 const ACT_KINDS = [['walk', 'Walking'], ['dance', 'Dance'], ['aerial', 'Aerial'], ['cycle', 'Cycling'], ['carry', 'Carrying / lifting'], ['other', 'Other']];
 function activityView(T2) {
   const list = T2.list;
-  const info = infoI('Before the ring (4 Nov): the activities you logged, with the effort you gave (or the usual for that kind of activity). From 4 Nov: Oura’s own light, moderate and hard minutes for the day. Oura’s light includes pottering and standing about, so it shows in the bars but Active minutes counts moderate + hard only, which keeps weeks comparable with before the ring. The top figures compare the last 7 days with the average week in the 4 weeks before.');
+  const info = infoI('Before the ring (4 Nov): the activities you logged, with the effort you gave (or the usual for that kind of activity). From 4 Nov: Oura’s own light, moderate and hard minutes for the day. Oura’s light minutes are left out (they’re mostly pottering and standing about), so ring days show moderate and hard only, comparable with before the ring. The top figures compare the last 7 days with the average week in the 4 weeks before.');
   let html = '<h2 class="tr-h tr-h-first">Activity' + info + '</h2>';
   if (!list.some((x) => x.d.am || (x.d.oura && x.d.oura.st))) return html + '<p class="small tr-hint">No activity logged yet.</p>';
   const sum = (arr, f) => arr.reduce((t, x) => t + (f(x) || 0), 0);
@@ -2825,20 +2825,20 @@ function activityView(T2) {
     (st7.length >= 3 ? tile('Steps a day', (Math.round(mean1(st7) / 100) * 100).toLocaleString('en-GB'), stSub) : tile('Hard effort', hard7 + ' min', 'of the ' + mins7)) + '</div>';
   // Daily bars, stacked by effort.
   const show = list.slice(-42), n = show.length, W = 360, L = 26, R = 6, H = 150, TOP = 8, B = 18, ch = H - TOP - B, bw = (W - L - R) / n;
-  const max = Math.max(30, Math.max.apply(null, show.map((x) => (x.d.ai ? x.d.ai[0] + x.d.ai[1] + x.d.ai[2] : x.d.am || 0))));
+  const max = Math.max(30, Math.max.apply(null, show.map((x) => (x.d.ai ? (x.d.ol ? 0 : x.d.ai[0]) + x.d.ai[1] + x.d.ai[2] : x.d.am || 0))));
   const nice = max <= 60 ? 60 : max <= 120 ? 120 : max <= 180 ? 180 : Math.ceil(max / 60) * 60;
   const Y = (v) => TOP + ch - (v / nice) * ch;
   let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Active minutes per day, last six weeks">';
   [0, nice / 2, nice].forEach((v) => { svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v).toFixed(1) + '" y2="' + Y(v).toFixed(1) + '" class="tr-grid"/><text x="' + (L - 4) + '" y="' + (Y(v) + 3).toFixed(1) + '" class="tr-ax" text-anchor="end">' + v + '</text>'; });
   show.forEach((x, i) => {
     const x0 = L + i * bw + bw * 0.15, w = Math.max(1.5, bw * 0.7);
-    const parts = x.d.ai ? x.d.ai : x.d.am ? (() => { const r = (x.d.al || 0) / x.d.am; return r >= 2.5 ? [0, 0, x.d.am] : r >= 1.5 ? [0, x.d.am, 0] : [x.d.am, 0, 0]; })() : [0, 0, 0];
+    const parts = x.d.ai ? (x.d.ol ? [0, x.d.ai[1], x.d.ai[2]] : x.d.ai) : x.d.am ? (() => { const r = (x.d.al || 0) / x.d.am; return r >= 2.5 ? [0, 0, x.d.am] : r >= 1.5 ? [0, x.d.am, 0] : [x.d.am, 0, 0]; })() : [0, 0, 0];
     let base = 0;
     ['light', 'mod', 'hard'].forEach((c, k) => { const v = parts[k] || 0; if (!v) return; svg += '<rect x="' + x0.toFixed(1) + '" y="' + Y(base + v).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (Y(base) - Y(base + v)).toFixed(1) + '" class="tr-actbar ' + c + '"/>'; base += v; });
     if (keyToDate(x.key).getDay() === 1 && i < n - 2) svg += '<text x="' + (L + i * bw).toFixed(1) + '" y="' + (H - 4) + '" class="tr-ax">' + esc(shortDate(x.key)) + '</text>';
     if (x.key === OURA_FROM) svg += '<line x1="' + (L + i * bw).toFixed(1) + '" x2="' + (L + i * bw).toFixed(1) + '" y1="' + TOP + '" y2="' + (TOP + ch) + '" class="tr-mark"/><text x="' + (L + i * bw - 3).toFixed(1) + '" y="' + (TOP + 8) + '" class="tr-ax" text-anchor="end">Oura tracking</text>';
     const kinds = x.d.ak ? ACT_KINDS.filter(([k]) => x.d.ak[k]).map(([k, l]) => l.toLowerCase() + ' ' + x.d.ak[k] + ' min') : [];
-    const tip = [longDate(x.key), x.d.ol ? (x.d.am || 0) + ' active min (moderate + hard, Oura)' : x.d.am ? x.d.am + ' active min' : 'no activity logged', kinds.join(', '), x.d.ai ? ['light', 'moderate', 'hard'].map((l, k) => (x.d.ai[k] ? x.d.ai[k] + ' ' + l : '')).filter(Boolean).join(' · ') : '', x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st.toLocaleString('en-GB') + ' steps' : ''].filter(Boolean).join(' · ');
+    const tip = [longDate(x.key), x.d.ol ? (x.d.am || 0) + ' active min (Oura)' : x.d.am ? x.d.am + ' active min' : 'no activity logged', kinds.join(', '), x.d.ai ? ['light', 'moderate', 'hard'].map((l, k) => (x.d.ai[k] && !(x.d.ol && !k) ? x.d.ai[k] + ' ' + l : '')).filter(Boolean).join(' · ') : '', x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st.toLocaleString('en-GB') + ' steps' : ''].filter(Boolean).join(' · ');
     svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (H - B) + '" class="tr-hit" data-tip="' + esc(tip) + '"/>';
   });
   html += '<div class="tr-sub">Active minutes a day</div>' + svg + '</svg><div class="tr-key act-key"><span><i class="ak light"></i>Light</span><span><i class="ak mod"></i>Moderate</span><span><i class="ak hard"></i>Hard</span></div>';
