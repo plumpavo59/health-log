@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v66 · 7 Nov';
+const APP_VERSION = 'v67 · 7 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -3122,10 +3122,10 @@ function activityAround(T2) {
     '<tr><td>' + esc(r.name.replace('Mental clarity', 'Clarity')) + '</td>' + r.cells.map((c) => {
       if (!c) return '<td class="same">–</td>';
       const tone = Math.abs(c.m) < 0.3 ? 'same' : c.m > 0 ? 'worse' : 'better';
-      return '<td class="' + tone + (c.pattern ? ' top' : '') + '">' + (tone === 'same' ? '≈' : (c.m > 0 ? '▲ ' : '▼ ') + Math.abs(c.m).toFixed(1)) + '<small>' + c.same + ' of ' + c.n + '</small></td>';
+      return '<td class="' + tone + (c.pattern ? ' top' : '') + '">' + (tone === 'same' ? '≈' : (c.m > 0 ? '▼ ' : '▲ ') + Math.abs(c.m).toFixed(1)) + '<small>' + c.same + ' of ' + c.n + '</small></td>';
     }).join('') + '</tr>').join('') + '</tbody></table>';
   p.html = h;
-  p.note = '▲ = worse than your usual (pain, stiffness, fatigue or headache higher; clarity or mood lower), ▼ = better, ≈ = within 0.3. "5 of 6" = how many occasions went that way. Usual = the middle value of the 14 days before each occasion. Uses up-and-about readings only, each part of the day counted once. Late nights, missed medication and other things change too, so this shows patterns, not causes.';
+  p.note = '▲ = better than your usual, ▼ = worse (pain, stiffness, fatigue or headache higher; clarity or mood lower), ≈ = within 0.3. "5 of 6" = how many occasions went that way. Usual = the middle value of the 14 days before each occasion. Uses up-and-about readings only, each part of the day counted once. Late nights, missed medication and other things change too, so this shows patterns, not causes.';
   return p;
 }
 function activityPatterns(T2) {
@@ -3167,7 +3167,7 @@ function activityPatterns(T2) {
   h += '<p class="pt-lead">' + (top.length ? 'Biggest difference ' + lagWord + ': <b>' + top.map((r) => esc(r.name.toLowerCase()) + ' ' + Math.abs(r.d).toFixed(1) + ' ' + word(r)).join('</b> and <b>') + '</b> after more active days.' : 'No symptom differs by half a point or more ' + lagWord + ' between more and less active days so far.') + '</p>';
   h += '<table class="pt-table"><thead><tr><th>' + esc(lagWord.charAt(0).toUpperCase() + lagWord.slice(1)) + '</th><th>Less active days</th><th>More active days</th><th></th></tr></thead><tbody>' + rows.map((r) => {
     const tone = Math.abs(r.d) < 0.5 ? 'same' : r.d > 0 ? 'worse' : 'better';
-    return '<tr class="' + tone + (top.includes(r) ? ' top' : '') + '"><td>' + esc(r.name) + '</td><td>' + r.q + '</td><td>' + r.b + '</td><td>' + (tone === 'same' ? '≈' : (r.d > 0 ? '▲ ' : '▼ ') + Math.abs(r.d).toFixed(1) + (tone === 'worse' ? ' worse' : ' better')) + '</td></tr>';
+    return '<tr class="' + tone + (top.includes(r) ? ' top' : '') + '"><td>' + esc(r.name) + '</td><td>' + r.q + '</td><td>' + r.b + '</td><td>' + (tone === 'same' ? '≈' : (r.d > 0 ? '▼ ' : '▲ ') + Math.abs(r.d).toFixed(1) + (tone === 'worse' ? ' worse' : ' better')) + '</td></tr>';
   }).join('') + '</tbody></table>';
   p.html = h;
   p.note = 'More active = days above your middle (median) ' + (useSteps ? 'step count (Oura)' : 'number of active minutes logged') + '; less active = the rest. Differences under half a point count as the same. Stress is shown out of 5. Other things change too (sleep, stress, food), so this shows patterns, not causes.';
