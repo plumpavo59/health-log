@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v64 · 7 Nov';
+const APP_VERSION = 'v65 · 7 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2958,10 +2958,12 @@ function nextDayVerdict(a, b, bName) {
    and the Activity patterns popup. */
 const OURA_FROM = '2026-11-04';  // Oura ring worn from here: activity and sleep records are more complete after this.
 /* v56: one night in detail: Oura's sleep stages strip and figures beside your own rating. */
+const minText = (m) => { m = Math.round(m); return m >= 60 ? Math.floor(m / 60) + ' h ' + ('0' + (m % 60)).slice(-2) : m + ' min'; };
 function nightDetail(x) {
   const d = x.d, o = d.os || {};
   let h = '<div class="night-det"><div class="nd-h"><b>Night to ' + esc(longDate(x.key)) + '</b><button type="button" class="link-btn" data-tr="night" data-v="' + x.key + '">Close</button></div>';
-  const times = [d.ib ? 'into bed ' + d.ib : '', d.bt ? 'asleep ' + d.bt : '', d.wk ? 'woke ' + d.wk : '', d.up ? 'out of bed ' + d.up + (o.upGuess ? ' (Oura’s guess)' : '') : ''].filter(Boolean).join(' · ');
+  // v65 (job 17): woke = when you really woke; Oura's later "last asleep" shows as dozing.
+  const times = [d.ib ? 'into bed ' + d.ib : '', d.bt ? 'asleep ' + d.bt : '', d.wk ? 'woke ' + d.wk : '', o.last && o.last !== d.wk ? 'dozing till ' + o.last : '', d.up ? 'up ' + d.up + (o.upGuess ? ' (Oura’s guess)' : '') : ''].filter(Boolean).join(' · ');
   if (times) h += '<p class="small">' + esc(times) + '</p>';
   if (o.hy) {
     // Hypnogram: one letter per 5 minutes (D deep, L light, R REM, A awake), "|" between sleep periods.
@@ -2975,7 +2977,7 @@ function nightDetail(x) {
   const cells = [cell('Asleep', giNum(d.sl) ? d.sl + ' h' : ''), cell('Oura sleep score', o.ss), cell('Your rating', giNum(d.q) ? d.q + '/10' : ''), cell('Disturbed (yours)', giNum(d.z) ? d.z + '/5' : ''),
     cell('HRV', o.hrv !== undefined ? o.hrv + ' ms' : ''), cell('Lowest heart rate', o.hr !== undefined ? o.hr + ' bpm' : ''), cell('Readiness', o.rd),
     cell('Deep / REM / light', o.dp !== undefined ? o.dp + ' / ' + (o.rem || 0) + ' / ' + (o.lt || 0) + ' h' : ''), cell('Awake in the night', o.awk !== undefined ? o.awk + ' min' : ''),
-    cell('In bed before sleep', o.inb !== undefined ? o.inb + ' min' : ''), cell('Lying in', o.lie !== undefined ? o.lie + ' min' : ''), cell('Nap that day', giNum(d.np) && d.np > 0 ? d.np + ' h' : '')].join('');
+    cell('In bed before sleep', o.inb !== undefined ? o.inb + ' min' : ''), cell('Time to get up', o.tgu !== undefined ? minText(o.tgu) : o.lie !== undefined ? o.lie + ' min' : ''), cell('Dozing after waking', o.doz ? o.doz + ' min' : ''), cell('Nap that day', giNum(d.np) && d.np > 0 ? d.np + ' h' : '')].join('');
   if (cells) h += '<div class="pt-stats nd-grid">' + cells + '</div>';
   if (!d.os && x.key < OURA_FROM) h += '<p class="small">Before the Oura ring: from your own check-ins.</p>';
   return h + '</div>';
@@ -3461,7 +3463,9 @@ function nightOf(d) {
   // v57: time in bed (into bed → out of bed) and time to fall asleep (into bed → asleep), only when both ends were recorded.
   const tib = inBed !== null && up !== null && up > inBed ? (up - inBed) / 60 : null;
   const lat = inBed !== null && bed !== null && bed >= inBed ? bed - inBed : null;
-  return { bed, woke, up, inBed, hours, tib, lat, q: giNum(d.q) ? d.q : null, z: giNum(d.z) ? d.z : null };
+  // v65: time to get up = woke → out of bed (how hard it is to get up, awake or dozing).
+  const tgu = woke !== null && up !== null && up >= woke && up - woke < 8 * 60 ? up - woke : null;
+  return { bed, woke, up, inBed, hours, tib, lat, tgu, q: giNum(d.q) ? d.q : null, z: giNum(d.z) ? d.z : null };
 }
 function sleepView(T2) {
   const list = T2.list.slice(-42), n = list.length;
@@ -3478,11 +3482,12 @@ function sleepView(T2) {
   };
   const minsWord = (dm) => { const m = Math.round(Math.abs(dm)); return m < 15 ? 'about usual' : (m >= 60 ? (m / 60).toFixed(1).replace('.0', '') + ' h' : m + ' min') + (dm > 0 ? ' later than usual' : ' earlier than usual'); };
   const numWord = (unit, more, less) => (dv) => (Math.abs(dv) < 0.25 ? 'about usual' : Math.abs(dv).toFixed(1) + unit + ' ' + (dv > 0 ? more : less) + ' than usual');
-  let html = '<h2 class="tr-h">Sleep' + infoI('Each bar is one night, from falling asleep (bottom) up to waking (top); the dashed part above is time in bed before getting up. Colour = sleep quality; grey = not rated. White lines = how disturbed (one per point out of 5). Dashed lines = your usual sleep and waking times (the 4 weeks before the last 7 nights). Time in bed (into bed → out of bed) and time to fall asleep (into bed → asleep) only count nights where both times were recorded. Naps aren’t included in hours asleep.') + '</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
+  let html = '<h2 class="tr-h">Sleep' + infoI('Each bar is one night, from falling asleep (bottom) up to waking (top); the dashed part above is the time to get up (from really waking, awake or dozing, to out of bed). Since the ring, woke = the first proper waking after your last deep sleep, not Oura’s last scrap of light sleep. Colour = sleep quality; grey = not rated. White lines = how disturbed (one per point out of 5). Dashed lines = your usual sleep and waking times (the 4 weeks before the last 7 nights). Time in bed (into bed → out of bed) and time to fall asleep (into bed → asleep) only count nights where both times were recorded. Naps aren’t included in hours asleep.') + '</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
     stat('Fell asleep at', 'bed', clockText, minsWord) +
     stat('Hours asleep', 'hours', (v) => v.toFixed(1), (dv) => numWord(' h', 'more', 'less')(dv) + (T2.list.slice(-7).some((x) => x.d.np) ? ' · nights only, a nap not counted' : '')) +
     stat('Time in bed', 'tib', (v) => v.toFixed(1) + ' h', numWord(' h', 'more', 'less')) +
     stat('Time to fall asleep', 'lat', (v) => Math.round(v) + ' min', (dv) => (Math.abs(dv) < 5 ? 'about usual' : Math.round(Math.abs(dv)) + ' min ' + (dv > 0 ? 'longer' : 'shorter') + ' than usual')) +
+    stat('Time to get up', 'tgu', (v) => minText(v), (dv) => (Math.abs(dv) < 10 ? 'about usual' : minText(Math.abs(dv)) + ' ' + (dv > 0 ? 'longer' : 'shorter') + ' than usual')) +
     stat('Quality', 'q', (v) => v.toFixed(1) + '/10', numWord('', 'higher', 'lower')) + '</div>';
   // Chart: time runs up from 22:00 (bottom) to 15:00 next day (top).
   const W = 360, L = 34, R = 4, top = 4, H = 250, base = H - 16, lo = 22 * 60, hi = 39 * 60, bw = (W - L - R) / n;
@@ -3520,7 +3525,7 @@ function sleepView(T2) {
   svg += '</svg>';
   const sel = TR.night && list.find((x) => x.key === TR.night);
   if (sel) svg += nightDetail(sel);
-  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span>' + (list.some((x) => x.d.np) ? '<span><i class="sl-k sl-napk"></i>Nap that day</span>' : '') + '<span><i class="sl-k sl-lie"></i>In bed, awake (before sleep and after waking)</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual: fell asleep ' + (uBed !== null ? clockText(uBed) : '–') + ', woke ' + (uWoke !== null ? clockText(uWoke) : '–') + '</span></div>' +
+  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span>' + (list.some((x) => x.d.np) ? '<span><i class="sl-k sl-napk"></i>Nap that day</span>' : '') + '<span><i class="sl-k sl-lie"></i>In bed before sleep, and time to get up (awake or dozing)</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual: fell asleep ' + (uBed !== null ? clockText(uBed) : '–') + ', woke ' + (uWoke !== null ? clockText(uWoke) : '–') + '</span></div>' +
     '' + patBtn('sleep', 'Sleep patterns');
   return html;
 }
