@@ -725,3 +725,7 @@ html.share-mode .eyebrow{visibility:hidden}
 .pt-around td.worse{color:#c8463f}.pt-around td.better{color:#2f8a4c}.pt-around td.same{color:var(--muted2)}.pt-around td.top{font-weight:700}
 .pt-around td small{display:block;font-size:10.5px;color:var(--muted2);font-weight:400}.pt-around th{font-size:10.5px;padding:6px 2px}
 .pt-around{table-layout:fixed}.pt-around td,.pt-around th{white-space:normal;width:19%}.pt-around td:first-child,.pt-around th:first-child{width:24%}
+.lr-edit{margin-left:6px;font-size:13px}.edit-what{margin:2px 0 10px;font-weight:600}
+.edit-row{display:flex;align-items:center;gap:10px;margin:0 0 10px}.edit-row span{width:96px;flex:none;color:var(--muted2);font-size:14px}.edit-row input{flex:1;min-width:0}
+.seg.edit-del{width:100%;margin-top:6px;color:#c8463f}.seg.edit-del.on{background:#c8463f;color:#fff;border-color:#c8463f}
+.edit-row input[type=time]{height:44px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font:inherit;color:inherit;background:transparent}

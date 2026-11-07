@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v63 · 7 Nov';
+const APP_VERSION = 'v64 · 7 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -751,7 +751,7 @@ function logRender() {
       '<div class="lrow warn"><span class="t">' + esc(m.r.hm) + '</span><span>' + esc(m.miss.join(', ')) + ' not in the sheet</span><button type="button" class="link-btn" data-act="readd" data-v="' + esc(m.r.id) + '">Re-add</button></div>').join('') + rows.filter((r) => S.loggedOpen || r.status === 'pending').map((r) =>
       '<div class="lrow"><span class="t">' + esc(r.hm || '–') + '</span><span>' + esc(r.text) + '</span>' +
       (r.status === 'pending' ? '<button type="button" class="link-btn" data-act="undo" data-v="' + esc(r.id) + '">Undo</button>' :
-        r.local && r.status !== 'saved' ? '<span class="st">Waiting</span>' : '<span class="st">' + esc(r.src || '') + '</span>') + '</div>').join('') +
+        r.local && r.status !== 'saved' ? '<span class="st">Waiting</span>' : '<span class="st">' + esc(r.src || '') + (r.row ? '</span><button type="button" class="link-btn lr-edit" data-act="edit-open" data-v="' + r.row + '">Edit</button>' : '</span>')) + '</div>').join('') +
       failed.map((r) => '<div class="lrow"><span class="t">' + esc(r.hm) + '</span><span>' + esc(r.text) + '</span><span class="st bad">Not saved</span></div>').join('') + '</section>' : '') +
     sheetView();
   S.sheetFresh = false;
@@ -934,7 +934,7 @@ function quickView() {
 }
 function sheetView() {
   if (!S.sheet || !Conn.canLog()) return '';
-  const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity', moment: 'Moment', plan: 'Medication plan' }[S.sheet];
+  const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity', moment: 'Moment', plan: 'Medication plan', edit: 'Edit entry' }[S.sheet];
   let body = '', btn = '';
   if (S.sheet === 'meds') {
     const sup = suppList();
@@ -961,6 +961,15 @@ function sheetView() {
     body = '<div class="chips">' + MOMENTS.map((m) => '<button type="button" class="chip" data-act="moment-pick" data-v="' + m + '" aria-pressed="' + S.moment.includes(m) + '"><b>' + m + '</b></button>').join('') + '</div>' +
       '<input type="text" id="moment-note" data-field="momentNote" value="' + esc(S.momentNote) + '" placeholder="Note (optional)" aria-label="Moment note" autocomplete="off" enterkeyhint="send">' +
       '<p class="small">For moments that stand out. Kept separate from your day scores. Tracking since 29 Oct.</p>';
+  } else if (S.sheet === 'edit') {
+    // v64: change the time (and the words of a meal, activity or note), or delete. Needs HealthLog v64.
+    const E = S.edit || {};
+    btn = '<button type="button" class="log" data-act="edit-save"' + (E.busy ? ' disabled' : '') + '>Save</button>';
+    body = '<p class="edit-what">' + esc(E.text || '') + '</p>' +
+      '<label class="edit-row"><span>Time</span><input type="time" data-field="editTime" value="' + esc(S.editTime || '') + '"></label>' +
+      (E.et !== undefined ? '<label class="edit-row"><span>' + (E.kind === 'food' ? 'What you ate' : E.kind === 'activity' ? 'Activity' : 'Note') + '</span><input type="text" data-field="editText" value="' + esc(S.editText || '') + '" autocomplete="off"></label>' : '<p class="small">To change scores or a dose, delete this and log it again.</p>') +
+      '<button type="button" class="seg edit-del' + (E.confirm ? ' on' : '') + '" data-act="edit-delete"' + (E.busy ? ' disabled' : '') + '>' + (E.confirm ? 'Tap again to delete' : 'Delete') + '</button>' +
+      '<p class="small">Delete keeps the entry in your tracker, marked “Deleted in app”, so nothing is lost.' + (E.error ? ' <b>' + esc(E.error) + '</b>' : '') + '</p>';
   } else if (S.sheet === 'plan') {
     body = planHtml(healthKey(new Date()), false);
   } else if (S.sheet === 'food') {
@@ -984,7 +993,7 @@ function sheetView() {
   const now = new Date();
   const label = S.time ? (dayKey(S.time) === dayKey(now) ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time) : 'Now · ' + hm(now);
   if (S.sheet === 'food' || S.sheet === 'activity' || S.sheet === 'bowel') body += todayListHtml(S.sheet);
-  const when = S.sheet === 'plan' ? '' : '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
+  const when = S.sheet === 'plan' || S.sheet === 'edit' ? '' : '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
   return '<div class="sheet-backdrop' + (S.sheetFresh ? ' fresh' : '') + '" data-act="sheet-close"></div>' +
     '<div class="sheet' + (S.sheetFresh ? ' fresh' : '') + '" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">' +
     '<div class="sheet-grab" aria-hidden="true"></div><div class="sheet-head"><h2 id="sheet-title">' + title + '</h2>' + btn +
@@ -1172,6 +1181,28 @@ function commit(kind, payload, label, extra) {
   toast('Logging ' + label, entry.entryId);
 }
 
+async function editSend(op) {
+  const E = S.edit;
+  if (!E || E.busy) return;
+  const body = { action: 'log', edit: true, op, row: E.row, t: E.t };
+  if (op === 'save') {
+    if (/^\d{2}:\d{2}$/.test(S.editTime || '') && S.editTime !== E.hm) body.time = S.editTime;
+    if (E.et !== undefined && S.editText.trim() && S.editText.trim() !== String(E.et).trim()) body.text = S.editText.trim();
+    if (!body.time && !body.text) { S.edit = null; closeSheet(); return; }
+  }
+  E.busy = true; E.error = ''; logRender();
+  let res = null;
+  try { res = await api(body); } catch (e) { res = null; }
+  if (res && res.success) {
+    S.edit = null; closeSheet(); toast(op === 'delete' ? 'Deleted' : 'Saved');
+    try { await logRefreshConfig(); } catch (e) { /* the list catches up on the next refresh */ }
+    logRender();
+  } else {
+    E.busy = false; E.confirm = false;
+    E.error = !navigator.onLine ? 'Needs a connection.' : res && /unknown|kind/i.test(String(res.error)) ? 'Needs the HealthLog v64 update.' : res && res.error ? res.error : 'Didn’t save. Try again.';
+    logRender();
+  }
+}
 function logUndo(id) {
   if (!pending[id]) return;
   clearTimeout(pending[id]);
@@ -1341,6 +1372,19 @@ function logAct(el) {
   else if (act === 'pair') { openSettings('pair'); }
   else if (act === 'flush') { logFlush(); }
   else if (act === 'undo') { logUndo(v); }
+  else if (act === 'edit-open') {
+    const e = todayEntries().find((x) => String(x.row) === String(v));
+    if (!e) return;
+    S.edit = { row: e.row, t: e.t, kind: e.kind, text: e.text, hm: e.hm, et: e.et };
+    S.editTime = e.hm || ''; S.editText = e.et || '';
+    openSheet('edit');
+  }
+  else if (act === 'edit-save') { editSend('save'); }
+  else if (act === 'edit-delete') {
+    if (!S.edit) return;
+    if (!S.edit.confirm) { S.edit.confirm = true; logRender(); return; }
+    editSend('delete');
+  }
   else if (act === 'bowel') {
     if (!S.bristol) return;
     const label = 'Bristol ' + S.bristol + (S.size ? ' · ' + S.size.toLowerCase() : '') + (S.urgent ? ' · urgent' : '') + (S.bpain ? ' · ' + S.bpain + ' painful' : '');
