@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v62 · 7 Nov';
+const APP_VERSION = 'v63 · 7 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2347,7 +2347,7 @@ const TREND_SYMS = [
 const COMPARE_FROM = '2026-12-01';
 const USUAL_DAYS = 28, USUAL_MIN = 5, MIN_READINGS = 2;
 const SYM_WORSE = 1.0, SYM_MUCH = 2.0, AVG_WORSE = 0.5, AVG_MUCH = 1.25, AVG_BETTER = -0.75;
-const TR = { sec: SHARE_ID ? null : LS.get('trends.sec', null), gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc3', TREND_SYMS.map((x) => x.k)), days: {} };
+const TR = { pgrid: LS.get('trends.pgrid', 'all'), sec: SHARE_ID ? null : LS.get('trends.sec', null), gi: LS.get('trends.gi2', 'both'), at: 0, loading: false, sel: null, ssel: null, med: LS.get('trends.med', null), calScroll: {}, tipEl: null, on: LS.get('trends.on', ['load']), inc: LS.get('trends.inc3', TREND_SYMS.map((x) => x.k)), days: {} };
 if (!LS.get('trends.x1', false)) { if (!TR.on.includes('x')) TR.on.push('x'); LS.set('trends.x1', true); }  // v54: stress line on once
 // Brain fog and headache are off by default now; move anyone still on the old default.
 
@@ -2444,10 +2444,138 @@ function trendsDays() {
     x.cls = !x.enough || avg === null ? (x.load !== null ? 'thin' : 'none')
       : max >= SYM_MUCH || avg >= AVG_MUCH ? 'much' : max >= SYM_WORSE || avg >= AVG_WORSE ? 'worse' : avg <= AVG_BETTER && max < 0.5 ? 'better' : 'usual';
   });
-  markFlares(list);
+  if (list.some((x) => x.d.pt)) partsScore(list); else markFlares(list);
   const by = {};
   list.forEach((x) => { by[x.key] = x; });
-  return { list, by, today, marks: Array.isArray(sy.marks) ? sy.marks : [], means: list.some((x) => x.d.a) };
+  return { list, by, today, marks: Array.isArray(sy.marks) ? sy.marks : [], means: list.some((x) => x.d.a), parts: list.some((x) => x.d.pt) };
+}
+/* v63 (job 14): a hard-day score that doesn't depend on how often you log (needs HealthLog v63, which sends each
+   day's six symptoms averaged by part: w Wake check-in in bed · m morning · a afternoon · e evening · b Bed check-in).
+   - Each reading is compared with your usual for that kind of check-in (in bed on waking, up and about, in bed at
+     night): the middle value of the 28 days before. Lying-down readings are never compared with daytime ones.
+   - Only up-and-about parts make the score when there are any; in-bed parts are used only on days with nothing else
+     ("low confidence").
+   - Each part counts once however many check-ins it had. Day score = half the average of the parts + half the worst.
+   - Worse at +0.6, much worse at +1.2, or worse when any one symptom is 3+ above usual within a part.
+   - Moments are shown, never counted. No readings = no data. A flare = 2+ worse days in a row (one no-data day can
+     sit between them); a single much-worse day is a bad day. */
+const PART_UP = ['m', 'a', 'e'], PART_KIND = { w: 'W', m: 'U', a: 'U', e: 'U', b: 'B' };
+const DAY_WORSE = 0.6, DAY_MUCH = 1.2, PART_SYM_WORSE = 3, DAY_BETTER = -0.75;
+function partUsuals(list) {
+  // For each day: usual[kind][symptom] from the 28 days before; also per row (w, m, a, e, b) for the grid.
+  const ks = TREND_SYMS.map((x) => x.k), all = {};
+  const vals = (days, part, k) => { const out = []; days.forEach((y) => { const v = y.d.pt && y.d.pt[part] && y.d.pt[part][k]; if (typeof v === 'number') out.push(v); }); return out; };
+  ['w', 'm', 'a', 'e', 'b'].forEach((pt) => ks.forEach((k) => { all[pt + k] = vals(list, pt, k); }));
+  const usual = (arr, fall) => (arr.length >= USUAL_MIN ? median(arr) : fall.length >= USUAL_MIN ? median(fall) : null);
+  list.forEach((x, i) => {
+    const prior = list.slice(Math.max(0, i - USUAL_DAYS), i);
+    x.pu = { W: {}, U: {}, B: {}, row: { w: {}, m: {}, a: {}, e: {}, b: {} } };
+    ks.forEach((k) => {
+      x.pu.W[k] = usual(vals(prior, 'w', k), all['w' + k]);
+      x.pu.B[k] = usual(vals(prior, 'b', k), all['b' + k]);
+      x.pu.U[k] = usual(PART_UP.reduce((a, pt) => a.concat(vals(prior, pt, k)), []), PART_UP.reduce((a, pt) => a.concat(all[pt + k]), []));
+      ['w', 'm', 'a', 'e', 'b'].forEach((pt) => { x.pu.row[pt][k] = usual(vals(prior, pt, k), all[pt + k]); });
+    });
+  });
+}
+/* One part's level (mean of the chosen symptoms) and its difference from usual (mean of each symptom's difference). */
+function partOf(x, pt, keys, byRow) {
+  const v = x.d.pt && x.d.pt[pt];
+  if (!v) return null;
+  const u = byRow ? x.pu.row[pt] : x.pu[PART_KIND[pt]];
+  const have = keys.filter((k) => typeof v[k] === 'number');
+  if (!have.length) return null;
+  const devs = {};
+  have.forEach((k) => { if (u[k] !== null && u[k] !== undefined) devs[k] = v[k] - u[k]; });
+  const dl = Object.values(devs);
+  return { level: have.reduce((t, k) => t + v[k], 0) / have.length, dev: dl.length ? dl.reduce((t, a) => t + a, 0) / dl.length : null, devs };
+}
+const PART_NAMES = { w: 'on waking (in bed)', m: 'morning', a: 'afternoon', e: 'evening', b: 'in bed at night' };
+function partsLine(x) {
+  const keys = incSyms().map((y) => y.k);
+  return ['w', 'm', 'a', 'e', 'b'].map((pt) => { const p = partOf(x, pt, keys); return p && p.dev !== null ? PART_NAMES[pt] + ' ' + (p.dev >= 0 ? '+' : '−') + Math.abs(p.dev).toFixed(1) : ''; }).filter(Boolean).join(', ');
+}
+/* v63 (job 14f): symptoms through the day, in the stomach grid's format. Rows: Wake (in bed) · Morning · Afternoon ·
+   Evening · Bed, last 6 weeks; each cell coloured by how far that part was from your usual for that row, so in-bed
+   rows aren't pale just because you were lying down. Overall = the chosen symptoms together. */
+const SP_ROWS = [['w', 'Wake'], ['m', 'Morning'], ['a', 'Afternoon'], ['e', 'Evening'], ['b', 'Bed']];
+function spClass(dev) { return dev === null || dev === undefined ? '' : dev <= -0.75 ? 'hb' : dev < 0.6 ? 'h1' : dev < 1.2 ? 'h2' : dev < 2 ? 'h3' : 'h4'; }
+function symPartsView(T2, today) {
+  const mode = TREND_SYMS.some((x) => x.k === TR.pgrid) ? TR.pgrid : 'all';
+  const keys = mode === 'all' ? incSyms().map((x) => x.k) : [mode];
+  const n = 42, W = 360, L = 58, R = 4, rowH = 12, gap = 3, top = 4, sep = 6;
+  const bw = (W - L - R) / n;
+  const yOf = (r) => top + r * (rowH + gap) + (r >= 1 ? sep : 0) + (r >= 4 ? sep : 0);
+  const H = yOf(4) + rowH + 14, first = addDays(today, -(n - 1));
+  let svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Symptoms by part of the day, last six weeks">';
+  SP_ROWS.forEach(([, name], r) => { svg += '<text x="' + (L - 6) + '" y="' + (yOf(r) + rowH - 2) + '" class="tr-ax" text-anchor="end">' + name + '</text>'; });
+  const shown = (k, v) => { const t = TREND_SYMS.find((y) => y.k === k); return t.name.replace('Mental clarity', 'clarity').toLowerCase() + ' ' + (t.inv ? Math.round((10 - v) * 10) / 10 : v); };
+  for (let i = 0; i < n; i++) {
+    const k = addDays(first, i), x = T2.by[k];
+    if (!x || !x.d.pt) continue;
+    const bits = [];
+    SP_ROWS.forEach(([pt, name], r) => {
+      const p = partOf(x, pt, keys, true);
+      if (!p) return;
+      const cls = spClass(p.dev) || 'h0';
+      svg += '<rect x="' + (L + i * bw + 0.5).toFixed(1) + '" y="' + yOf(r) + '" width="' + Math.max(1.5, bw - 1).toFixed(1) + '" height="' + rowH + '" rx="1.5" class="tr-part ' + cls + '"/>';
+      const v = x.d.pt[pt];
+      bits.push(name.toLowerCase() + ': ' + Object.keys(v).filter((kk) => mode === 'all' || kk === mode).map((kk) => shown(kk, v[kk])).join(', ') + (p.dev !== null ? ' (' + (p.dev >= 0 ? '+' : '−') + Math.abs(p.dev).toFixed(1) + ')' : ''));
+    });
+    if (bits.length) svg += '<rect x="' + (L + i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + (yOf(4) + rowH) + '" class="tr-hit" data-tip="' + esc(longDate(k) + ' · ' + bits.join(' · ')) + '"/>';
+  }
+  svg += '<text x="' + L + '" y="' + (H - 1) + '" class="tr-ax">' + esc(shortDate(first)) + '</text><text x="' + (W - R) + '" y="' + (H - 1) + '" class="tr-ax" text-anchor="end">' + esc(shortDate(today)) + '</text></svg>';
+  const chips = [['all', 'Overall']].concat(TREND_SYMS.map((x) => [x.k, x.name.replace('Mental clarity', 'Clarity')]));
+  return '<h2 class="tr-h">Through the day' + infoI('Each cell is one part of a day: Wake = the in-bed check-in on waking, Bed = the in-bed one at night, the rest are up-and-about readings by time (morning to 12:00, afternoon 12–17, evening 17:00 on). Colour = how far that part was from your usual for that row (the 28 days before), so lying-down rows are compared with lying-down readings. Overall = the symptoms chosen under Day by day together. Blank = nothing logged. In brackets: points above (+) or below (−) usual.') + '</h2>' +
+    '<div class="tr-chips tr-gichips">' + chips.map(([k, l]) => '<button type="button" class="tr-chip" data-tr="pgrid" data-v="' + k + '" aria-pressed="' + (mode === k) + '">' + esc(l) + '</button>').join('') + '</div>' + svg +
+    '<div class="tr-key"><span class="tr-kc"><i class="hb"></i>Better</span><span class="tr-kc"><i class="h1"></i>Usual</span><span class="tr-kc"><i class="h2"></i>A bit worse</span><span class="tr-kc"><i class="h3"></i>Worse</span><span class="tr-kc"><i class="h4"></i>Much worse</span></div>';
+}
+function partsScore(list) {
+  partUsuals(list);
+  const keys = incSyms().map((x) => x.k);
+  const half = (arr) => (arr.length ? 0.5 * (arr.reduce((t, a) => t + a, 0) / arr.length) + 0.5 * Math.max.apply(null, arr) : null);
+  list.forEach((x) => {
+    let parts = PART_UP.map((pt) => partOf(x, pt, keys)).filter(Boolean);
+    x.low = false;
+    if (!parts.length) { parts = ['w', 'b'].map((pt) => partOf(x, pt, keys)).filter(Boolean); x.low = parts.length > 0; }
+    x.nParts = parts.length;
+    x.load = half(parts.map((p) => p.level));
+    x.enough = x.load !== null;
+    const devParts = parts.filter((p) => p.dev !== null);
+    x.score = half(devParts.map((p) => p.dev));
+    x.dev = {};
+    parts.forEach((p) => Object.keys(p.devs).forEach((k) => { if (x.dev[k] === undefined || p.devs[k] > x.dev[k]) x.dev[k] = p.devs[k]; }));
+    const maxSym = Object.values(x.dev).length ? Math.max.apply(null, Object.values(x.dev)) : null;
+    x.cls = x.load === null ? 'none' : x.score === null ? 'thin'
+      : x.score >= DAY_MUCH ? 'much' : x.score >= DAY_WORSE || maxSym >= PART_SYM_WORSE ? 'worse' : x.score <= DAY_BETTER && maxSym < 0.5 ? 'better' : 'usual';
+  });
+  // Usual day level, for the chart's grey line and the "this week" tile.
+  list.forEach((x, i) => {
+    const prior = list.slice(Math.max(0, i - USUAL_DAYS), i).filter((y) => y.load !== null).map((y) => y.load);
+    x.usual = prior.length >= USUAL_MIN ? median(prior) : null;
+  });
+  // Flares: 2+ worse days in a row; one no-data day may sit between them. A single much-worse day is a bad day.
+  const bad = (x) => x && (x.cls === 'worse' || x.cls === 'much');
+  list.forEach((x) => { x.flare = false; x.badDay = false; x.fday = false; });
+  const eps = [];
+  for (let i = 0; i < list.length; i++) {
+    if (!bad(list[i])) continue;
+    let j = i, cnt = 1;
+    while (true) {
+      if (bad(list[j + 1])) { j++; cnt++; continue; }
+      if (list[j + 1] && list[j + 1].cls === 'none' && bad(list[j + 2])) { j += 2; cnt++; continue; }
+      break;
+    }
+    if (cnt >= 2) {
+      const days = list.slice(i, j + 1);
+      days.forEach((y) => { y.flare = true; });
+      const why = [];
+      TREND_SYMS.forEach((sm) => { if (days.some((y) => (y.dev || {})[sm.k] >= 1)) why.push(sm.name.toLowerCase()); });
+      eps.push({ from: list[i].key, to: list[j].key, days: j - i + 1, why });
+    } else if (list[i].cls === 'much') list[i].badDay = true;
+    i = j;
+  }
+  list.flareEps = eps;
 }
 /* v32 flares, worked out automatically (nothing marked by hand; "Flare" notes are ignored).
    A flare day is a day much worse than usual, or a Very tired / Weak moment followed by a worse or much-worse
@@ -2585,7 +2713,7 @@ function trendsRender() {
     const x = by[sel];
     const vals = x ? TREND_SYMS.filter((sm) => typeof symVal(x.d, sm.k) === 'number').map((sm) => sm.name.toLowerCase() + ' ' + (sm.inv ? Math.round((10 - symVal(x.d, sm.k)) * 10) / 10 : symVal(x.d, sm.k))) : [];
     dayHtml += '<p class="tr-detail"><b>' + esc(longDate(sel)) + '</b> · ' + (x && x.load !== null
-      ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') + (x.flare ? ' · part of a flare' : x.badDay ? ' · bad day' : '') + ' · ' + vals.join(', ') +
+      ? (T2.parts && x.score !== null && x.score !== undefined ? 'day ' + (x.score >= 0 ? '+' : '−') + Math.abs(x.score).toFixed(1) + ' vs usual' + (x.low ? ' (in-bed readings only, low confidence)' : '') + ' · ' + partsLine(x) : 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '')) + (x.flare ? ' · part of a flare' : x.badDay ? ' · bad day' : '') + ' · ' + vals.join(', ') +
         (Object.keys(x.dev || {}).filter((kk) => x.dev[kk] >= SYM_WORSE).length ? ' · above usual: ' + Object.keys(x.dev).filter((kk) => x.dev[kk] >= SYM_WORSE).map((kk) => { const t = TREND_SYMS.find((y) => y.k === kk); return t.name.toLowerCase() + (t.inv ? ' −' : ' +') + x.dev[kk].toFixed(1); }).join(', ') : '') +
         (x.readings ? ' · ' + x.readings + (x.readings === 1 ? ' reading' : ' readings') : '') + (T2.means ? '' : ' · daily highs')
       : (x && x.flare ? 'part of a flare · ' : '') + (sel === today ? 'no check-in yet today' : 'no check-in logged')) + '</p>' + dayStrip(sel);
@@ -2595,7 +2723,7 @@ function trendsRender() {
   // v37: the symptom chart comes first, with a title; the day-by-day calendar follows.
   // v54: stress is a line on the main chart (0–5 shown on the 0–10 scale, so 5 sits at the top), toggled like a symptom.
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS).concat(T2.list.some((x) => giNum(symVal(x.d, 'x'))) ? [{ k: 'x', name: 'Stress', color: '#8a5cc2' }] : []);
-  let over = '<h2 class="tr-h tr-h-first tr-h-main">All symptoms' + infoI('The main picture. Overall = the day score: the average of that day’s readings for the symptoms chosen under Day by day. The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Show alongside: Stress (purple dashed; your 0–5 doubled, so 5 = 10) and Activity (light blue bars: steps that day, 10 = 15,000 steps or more; days without a step count have no bar), on the same 0–10 scale so they line up with the symptoms.') + '</h2>';
+  let over = '<h2 class="tr-h tr-h-first tr-h-main">All symptoms' + infoI('The main picture. Overall = ' + (T2.parts ? 'the day’s level for the symptoms chosen under Day by day: up-and-about readings averaged within morning, afternoon and evening, then half the average of those parts + half the worst one, so logging more often doesn’t change it.' : 'the day score: the average of that day’s readings for the symptoms chosen under Day by day.') + ' The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Show alongside: Stress (purple dashed; your 0–5 doubled, so 5 = 10) and Activity (light blue bars: steps that day, 10 = 15,000 steps or more; days without a step count have no bar), on the same 0–10 scale so they line up with the symptoms.') + '</h2>';
   const chip = (s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>';
   const symSeries = series.filter((s) => s.k !== 'x');
@@ -2603,7 +2731,8 @@ function trendsRender() {
   over += '<div class="tr-chips">' + symSeries.map(chip).join('') + '</div>' +
     (extra.length ? '<div class="tr-chips tr-extra"><span class="tr-extra-l">Show alongside</span>' + extra.map(chip).join('') + '</div>' : '');
   over += trendsChart(T2);
-  over += '<h2 class="tr-h">Day by day' + infoI('Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
+  over += '<h2 class="tr-h">Day by day' + infoI(T2.parts ? 'Each reading is compared with your usual for that kind of check-in (in bed on waking, up and about, in bed at night): the middle value of the ' + USUAL_DAYS + ' days before. The day is split into morning (to 12:00), afternoon (12–17) and evening (17:00 to bed); each part counts once however often you logged. Day = half the average of the parts + half the worst part, using up-and-about readings (in-bed ones only on days with nothing else: low confidence). Worse = +0.6 or more, or any one symptom 3+ above usual in a part; much worse = +1.2. Moments are shown but not counted. Flare (solid dot) = 2+ worse days in a row (a day with no readings can sit between). Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.' : 'Each day is compared with your usual (the middle value of the ' + USUAL_DAYS + ' days before). Worse = a chosen symptom a point or more above its usual, or the average half a point; much worse = 2+ points, or the average 1.25+. Days need ' + MIN_READINGS + '+ readings to be coloured. Flare (solid dot) = 2+ much-worse days in a row, or a Very tired / Weak moment followed by a much-worse day, joined with worse days either side. Bad day (ring) = a single much-worse day. Days run 04:00 to 04:00.') + '</h2>' + dayHtml;
+  if (T2.parts) over += symPartsView(T2, today);
   // v45: Health is split into sections with tabs at the top; only the chosen one is drawn.
   const secs = healthSections();
   const sec = curSection(secs);
@@ -2886,7 +3015,62 @@ function activityView(T2) {
 /* v51/v52: how activity relates to every symptom. Days are split at the median active minutes (
    or Oura steps once the ring is synced), then each symptom is compared on the same day, the next day or two days
    later. The table is sorted by the size of the difference, so the symptoms that move most come first. */
+/* v63 (job 15): what happens around active days, by kind of activity. Dance / aerial (and, with the ring, other
+   sessions with 30+ moderate + hard minutes) are kept apart from long walks and busy step days. For each occasion,
+   the day before, the day itself and the next two days are compared with your usual (middle value of the 14 days
+   before), using up-and-about readings averaged by part of the day (HealthLog v63). Every difference is shown; a
+   pattern is only named from about 10 occasions mostly going the same way. */
+function activityAround(T2) {
+  const list = T2.list, keys = TREND_SYMS.map((x) => x.k);
+  const upVal = (x, k) => { if (!x || !x.d.pt) return null; const v = PART_UP.map((pt) => x.d.pt[pt] && x.d.pt[pt][k]).filter((y) => typeof y === 'number'); return v.length ? v.reduce((t, a) => t + a, 0) / v.length : null; };
+  const nonWalkHard = (x) => (x.d.aki ? Object.keys(x.d.aki).filter((k) => k !== 'walk').reduce((t, k) => t + x.d.aki[k][1] + x.d.aki[k][2], 0) : 0);
+  const danceMin = (x) => (x.d.ak ? (x.d.ak.dance || 0) + (x.d.ak.aerial || 0) : 0);
+  const isDance = (x) => danceMin(x) >= 30 || (x.key >= OURA_FROM && nonWalkHard(x) >= 30);
+  const isWalk = (x) => !isDance(x) && ((x.d.ak && x.d.ak.walk >= 45) || (x.d.oura && giNum(x.d.oura.st) && x.d.oura.st >= 10000));
+  const group = TR.actGroup === 'walk' ? 'walk' : 'dance';
+  const test = group === 'walk' ? isWalk : isDance;
+  const occ = [];
+  list.forEach((x, i) => { if (i >= 2 && i < list.length - 1 && test(x)) occ.push(i); });
+  const OFF = [[-1, 'Day before'], [0, 'On the day'], [1, 'Next day'], [2, '2 days later']];
+  const rows = keys.map((k) => {
+    const sm = TREND_SYMS.find((y) => y.k === k);
+    const cells = OFF.map(([o]) => {
+      const diffs = [];
+      occ.forEach((i) => {
+        const t = list[i + o];
+        if (!t) return;
+        const v = upVal(t, k);
+        if (v === null) return;
+        const base = list.slice(Math.max(0, i - 15), Math.max(0, i - 1)).map((y) => upVal(y, k)).filter((y) => y !== null);
+        if (base.length < 5) return;
+        diffs.push(v - median(base));
+      });
+      if (!diffs.length) return null;
+      const m = mean1(diffs), worse = diffs.filter((d) => d > 0).length, better = diffs.filter((d) => d < 0).length;
+      const same = m >= 0 ? worse : better;
+      return { m, n: diffs.length, same, pattern: diffs.length >= 10 && same / diffs.length >= 0.7 && Math.abs(m) >= 0.3 };
+    });
+    return { name: sm.name, cells };
+  });
+  const p = { title: 'Activity and symptoms', stats: [], comps: [] };
+  let h = '<div class="tr-chips tr-lag">' + [['dance', 'Dance and hard sessions'], ['walk', 'Long walks and busy step days']].map(([k, l]) => '<button type="button" class="tr-chip" data-tr="actgroup" data-v="' + k + '" aria-pressed="' + (group === k) + '">' + l + '</button>').join('') + '</div>';
+  p.stats.push({ label: group === 'walk' ? 'Walking days' : 'Dance / hard days', value: String(occ.length), sub: occ.length >= 10 ? 'enough to see patterns' : 'patterns need about 10' });
+  if (!occ.length) { p.empty = 'No ' + (group === 'walk' ? 'long-walk or 10,000-step days' : 'dance or hard-session days') + ' with check-ins around them yet.'; p.html = h; return p; }
+  const pats = [];
+  rows.forEach((r) => r.cells.forEach((c, j) => { if (c && c.pattern) pats.push(r.name.toLowerCase() + ' ' + (c.m > 0 ? 'worse' : 'better') + ' ' + OFF[j][1].toLowerCase()); }));
+  h += '<p class="pt-lead">' + (pats.length ? 'Pattern: <b>' + esc(pats.join('; ')) + '</b>.' : occ.length < 10 ? 'Too few occasions to call anything a pattern yet; the numbers show the direction so far.' : 'No clear pattern: nothing goes the same way on 7 in 10 occasions.') + '</p>';
+  h += '<table class="pt-table pt-around"><thead><tr><th></th>' + OFF.map(([, l]) => '<th>' + l + '</th>').join('') + '</tr></thead><tbody>' + rows.map((r) =>
+    '<tr><td>' + esc(r.name.replace('Mental clarity', 'Clarity')) + '</td>' + r.cells.map((c) => {
+      if (!c) return '<td class="same">–</td>';
+      const tone = Math.abs(c.m) < 0.3 ? 'same' : c.m > 0 ? 'worse' : 'better';
+      return '<td class="' + tone + (c.pattern ? ' top' : '') + '">' + (tone === 'same' ? '≈' : (c.m > 0 ? '▲ ' : '▼ ') + Math.abs(c.m).toFixed(1)) + '<small>' + c.same + ' of ' + c.n + '</small></td>';
+    }).join('') + '</tr>').join('') + '</tbody></table>';
+  p.html = h;
+  p.note = '▲ = worse than your usual (pain, stiffness, fatigue or headache higher; clarity or mood lower), ▼ = better, ≈ = within 0.3. "5 of 6" = how many occasions went that way. Usual = the middle value of the 14 days before each occasion. Uses up-and-about readings only, each part of the day counted once. Late nights, missed medication and other things change too, so this shows patterns, not causes.';
+  return p;
+}
 function activityPatterns(T2) {
+  if (T2.parts) return activityAround(T2);
   const list = T2.list;
   const steps = (x) => (x && x.d.oura && giNum(x.d.oura.st) ? x.d.oura.st : null);
   const useSteps = list.filter((x) => steps(x) !== null).length >= 14;
@@ -3386,8 +3570,10 @@ function trendsClick(ev) {
   else if (act === 'pat') { TR.pop = v; TR.popFresh = true; trendsRender(); }
   else if (act === 'medrow') { TR.medOpen = TR.medOpen === v ? null : v; trendsRender(); }
   else if (act === 'gi') { TR.gi = v; LS.set('trends.gi2', v); trendsRender(); }
+  else if (act === 'pgrid') { TR.pgrid = v; LS.set('trends.pgrid', v); trendsRender(); }
   else if (act === 'night') { TR.night = TR.night === v ? null : v; trendsRender(); }
   else if (act === 'actlag') { TR.actLag = Number(v); trendsRender(); }
+  else if (act === 'actgroup') { TR.actGroup = v; trendsRender(); }
   else if (act === 'sec') { TR.sec = v; TR.pop = null; LS.set('trends.sec', v); trendsRender(); const tabs = document.querySelector('.tr-tabs'); if (tabs && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView(); }
   else if (act === 'pat-close') closePatterns();
   else if (act === 'pair') openSettings('pair');

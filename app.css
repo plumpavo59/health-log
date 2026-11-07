@@ -721,3 +721,7 @@ html.share-mode .eyebrow{visibility:hidden}
 .sl-ulab{font-size:8px;fill:var(--muted2)}
 .tr-trial-h{font-size:15.5px;font-weight:650;margin:16px 0 4px;display:flex;align-items:center;gap:8px}
 .tr-now{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;background:var(--ink);color:var(--bg);border-radius:999px;padding:2px 8px}
+.tr-part.h0{fill:var(--h0)}.tr-part.hb{fill:var(--hb)}.tr-part.h1{fill:var(--h1)}.tr-part.h2{fill:var(--h2)}.tr-part.h3{fill:var(--h3)}.tr-part.h4{fill:var(--h4)}.tr-kc .h2{background:var(--h2)}
+.pt-around td.worse{color:#c8463f}.pt-around td.better{color:#2f8a4c}.pt-around td.same{color:var(--muted2)}.pt-around td.top{font-weight:700}
+.pt-around td small{display:block;font-size:10.5px;color:var(--muted2);font-weight:400}.pt-around th{font-size:10.5px;padding:6px 2px}
+.pt-around{table-layout:fixed}.pt-around td,.pt-around th{white-space:normal;width:19%}.pt-around td:first-child,.pt-around th:first-child{width:24%}
