@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v61 · 6 Nov';
+const APP_VERSION = 'v62 · 7 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -366,8 +366,8 @@ const guessStage = () => (wokeToday() ? 'up' : 'bed');
 
 const S = {
   suppOn: false, supps: [],
-  open: false, period: null, stage: null, scores: {}, checkNote: '', calMed: null, moment: null, momentNote: '',
-  bristol: null, size: null, urgent: false, bowelNote: '',
+  open: false, period: null, stage: null, scores: {}, checkNote: '', calMed: null, moment: [], momentNote: '',
+  bristol: null, size: null, urgent: false, bpain: '', bowelNote: '',
   meds: [], doses: {}, food: '', time: null, timeOpen: false,
   sheet: null, sheetFresh: false, refreshing: false, inboxText: '', inboxStatus: '', dirty: false,
   sleepT: { bed: '', wake: '', up: '' }, wakeFlags: {},
@@ -703,10 +703,10 @@ function sleepTimesHtml() {
   return '<div class="sleep-times' + (S.ringOff ? '' : ' one') + '" role="group" aria-label="Sleep times">' + keys.map(([k, l]) =>
     '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') +
     '<button type="button" class="link-btn ring-off" data-act="ring-off">' + (S.ringOff ? 'Hide sleep times' : 'Ring off? Add sleep times') + '</button></div>' +
-    // v54: on waking, two yes/no buttons, saved in the check-in's note ("Morning: bad taste on waking: yes").
+    // v54/v62: on waking, yes/no buttons (bad taste, tinnitus, sore throat), saved in the check-in's note ("Morning: bad taste on waking: yes").
     '<div class="wake-flags" role="group" aria-label="On waking">' + WAKE_FLAGS.map(([k, l]) => '<button type="button" class="moment-btn" data-act="wake-flag" data-v="' + k + '" aria-pressed="' + !!S.wakeFlags[k] + '">' + l + '</button>').join('') + '</div>';
 }
-const WAKE_FLAGS = [['taste', 'Bad taste'], ['tinnitus', 'Tinnitus']];
+const WAKE_FLAGS = [['taste', 'Bad taste', 'bad taste on waking: yes'], ['tinnitus', 'Tinnitus', 'tinnitus on waking: yes'], ['throat', 'Sore throat', 'sore throat on waking: yes']];
 /* Typing guard: background refreshes (saving, config, the 60 s tick) wait until you leave the text box,
    so the box doesn't lose focus mid-word. Taps you make still re-render straight away, keeping your place. */
 function typingInLog() {
@@ -845,7 +845,7 @@ function momentsView() {
   // Tap one to include it with this check-in (the Note below goes with it); tap again to unselect.
   return '<div class="moments" role="group" aria-label="Moment">' + MOMENTS.map((m) => {
     const n = today.filter((r) => String(r.text || '').split(' · ')[0] === m).length;
-    return '<button type="button" class="moment-btn" data-act="moment-pick-ci" data-v="' + m + '" aria-pressed="' + (S.moment === m) + '">' + m + (n ? '<small>' + n + '</small>' : '') + '</button>';
+    return '<button type="button" class="moment-btn" data-act="moment-pick-ci" data-v="' + m + '" aria-pressed="' + S.moment.includes(m) + '">' + m + (n ? '<small>' + n + '</small>' : '') + '</button>';
   }).join('') + '</div>';
 }
 /* Today's entries (this health day, 4am cut-off) from every source: the receiver's list (HealthLog v12),
@@ -957,8 +957,8 @@ function sheetView() {
     btn = '<button type="button" class="log" data-act="bowel"' + (S.bristol ? '' : ' disabled') + '>Log</button>';
     body = bowelBody();
   } else if (S.sheet === 'moment') {
-    btn = '<button type="button" class="log" data-act="moment-log"' + (S.moment ? '' : ' disabled') + '>Log</button>';
-    body = '<div class="chips">' + MOMENTS.map((m) => '<button type="button" class="chip" data-act="moment-pick" data-v="' + m + '" aria-pressed="' + (S.moment === m) + '"><b>' + m + '</b></button>').join('') + '</div>' +
+    btn = '<button type="button" class="log" data-act="moment-log"' + (S.moment.length ? '' : ' disabled') + '>Log</button>';
+    body = '<div class="chips">' + MOMENTS.map((m) => '<button type="button" class="chip" data-act="moment-pick" data-v="' + m + '" aria-pressed="' + S.moment.includes(m) + '"><b>' + m + '</b></button>').join('') + '</div>' +
       '<input type="text" id="moment-note" data-field="momentNote" value="' + esc(S.momentNote) + '" placeholder="Note (optional)" aria-label="Moment note" autocomplete="off" enterkeyhint="send">' +
       '<p class="small">For moments that stand out. Kept separate from your day scores. Tracking since 29 Oct.</p>';
   } else if (S.sheet === 'plan') {
@@ -1015,8 +1015,8 @@ function closeSheet() {
   if (!S.sheet) return;
   S.sheet = null;
   // v39: closing a window drops whatever was selected in it (typed text is kept).
-  S.foodPhoto = null; S.meds = []; S.doses = {}; S.suppOn = false; S.supps = []; S.bristol = null; S.size = null; S.urgent = false;
-  S.actType = null; S.actMin = null; S.actEffort = null; S.actMinText = ''; S.moment = null;
+  S.foodPhoto = null; S.meds = []; S.doses = {}; S.suppOn = false; S.supps = []; S.bristol = null; S.size = null; S.urgent = false; S.bpain = '';
+  S.actType = null; S.actMin = null; S.actEffort = null; S.actMinText = ''; S.moment = [];
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   logRender();
 }
@@ -1104,6 +1104,9 @@ function bowelBody() {
     (S.bristol ? '<div class="grid-size" role="group" aria-label="Size">' + ['Small', 'Medium', 'Large'].map((z) =>
       '<button type="button" class="seg" data-act="size" data-v="' + z + '" aria-pressed="' + (S.size === z) + '">' + z + '</button>').join('') +
       '<button type="button" class="seg" data-act="urgent" aria-pressed="' + S.urgent + '">Urgent</button></div>' +
+      // v62: how painful it was (tap again to clear).
+      '<div class="grid-size grid-pain" role="group" aria-label="Painful">' + [['a bit', 'A bit painful'], ['very', 'Very painful']].map(([k, l]) =>
+        '<button type="button" class="seg" data-act="bpain" data-v="' + k + '" aria-pressed="' + (S.bpain === k) + '">' + l + '</button>').join('') + '</div>' +
       '<input type="text" data-field="bowelNote" value="' + esc(S.bowelNote) + '" placeholder="Note (optional)" aria-label="Bowel note" autocomplete="off">' : '');
 }
 
@@ -1137,7 +1140,7 @@ function localInputValue(d) { return dayKey(d) + 'T' + hm(d); }
 function updateCheckButton() {
   const b = $('check-save');
   if (!b) return;
-  const n = Object.keys(S.scores).length + ((S.period || guessPeriod()) === 'Wake' ? Object.values(S.sleepT).filter(Boolean).length : 0) + (S.moment ? 1 : 0);
+  const n = Object.keys(S.scores).length + ((S.period || guessPeriod()) === 'Wake' ? Object.values(S.sleepT).filter(Boolean).length + WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).length : 0) + (S.moment.length ? 1 : 0);
   b.disabled = !n;
   b.textContent = n ? 'Save check-in · ' + n + (n === 1 ? ' entry' : ' entries') : 'Save check-in';
 }
@@ -1236,16 +1239,16 @@ async function logRefreshConfig() {
 function logAct(el) {
   const act = el.dataset.act, v = el.dataset.v;
   if (act === 'sheet') { openSheet(v); return; }
-  if (act === 'moment-open') { S.moment = v; S.momentNote = ''; openSheet('moment'); return; }
-  if (act === 'moment-pick') { S.moment = v; logRender(); return; }
+  if (act === 'moment-open') { S.moment = [v]; S.momentNote = ''; openSheet('moment'); return; }
+  if (act === 'moment-pick' || act === 'moment-pick-ci') { S.moment = S.moment.includes(v) ? S.moment.filter((x) => x !== v) : S.moment.concat(v); logRender(); return; }  // v62: several at once
   if (act === 'ring-off') { S.ringOff = !S.ringOff; logRender(); return; }
   if (act === 'wake-flag') { S.wakeFlags[v] = !S.wakeFlags[v]; logRender(); return; }
-  if (act === 'moment-pick-ci') { S.moment = S.moment === v ? null : v; logRender(); return; }
   if (act === 'moment-log') {
-    if (!MOMENTS.includes(S.moment)) return;
-    const note = S.momentNote.trim();
-    commit('moment', { moment: S.moment, note }, S.moment + (note ? ' · ' + note : ''));
-    S.moment = null; S.momentNote = ''; closeSheet();
+    const picked = S.moment.filter((m) => MOMENTS.includes(m));
+    if (!picked.length) return;
+    const note = S.momentNote.trim(), at = S.time;
+    picked.forEach((m) => { S.time = at; commit('moment', { moment: m, note }, m + (note ? ' · ' + note : '')); });
+    S.moment = []; S.momentNote = ''; closeSheet();
     return;
   }
   if (act === 'plan-open') { openSheet('plan'); return; }
@@ -1302,6 +1305,7 @@ function logAct(el) {
   else if (act === 'bristol') { S.bristol = S.bristol === Number(v) ? null : Number(v); logRender(); }
   else if (act === 'size') { S.size = S.size === v ? null : v; logRender(); }
   else if (act === 'urgent') { S.urgent = !S.urgent; logRender(); }
+  else if (act === 'bpain') { S.bpain = S.bpain === v ? '' : v; logRender(); }
   else if (act === 'med') {
     if (S.meds.includes(v)) { S.meds = S.meds.filter((x) => x !== v); delete S.doses[v]; }
     else {
@@ -1339,9 +1343,9 @@ function logAct(el) {
   else if (act === 'undo') { logUndo(v); }
   else if (act === 'bowel') {
     if (!S.bristol) return;
-    const label = 'Bristol ' + S.bristol + (S.size ? ' · ' + S.size.toLowerCase() : '') + (S.urgent ? ' · urgent' : '');
-    commit('bowel', { bristol: S.bristol, size: S.size || '', urgent: S.urgent, note: S.bowelNote.trim() }, label);
-    S.bristol = null; S.size = null; S.urgent = false; S.bowelNote = ''; closeSheet();
+    const label = 'Bristol ' + S.bristol + (S.size ? ' · ' + S.size.toLowerCase() : '') + (S.urgent ? ' · urgent' : '') + (S.bpain ? ' · ' + S.bpain + ' painful' : '');
+    commit('bowel', { bristol: S.bristol, size: S.size || '', urgent: S.urgent, pain: S.bpain, note: S.bowelNote.trim() }, label);
+    S.bristol = null; S.size = null; S.urgent = false; S.bpain = ''; S.bowelNote = ''; closeSheet();
   }
   else if (act === 'meds') {
     const sup = S.suppOn ? S.supps.slice() : [];
@@ -1377,26 +1381,24 @@ function logAct(el) {
     const stage = period === 'Wake' ? (S.stage || guessStage()) : '';
     const times = period === 'Wake' ? Object.fromEntries(Object.entries(S.sleepT).filter(([, v]) => /^\d{2}:\d{2}$/.test(v))) : {};
     const n = Object.keys(S.scores).length, t = Object.keys(times).length;
-    const mo = MOMENTS.includes(S.moment) ? S.moment : null;
-    if (!n && !t && !mo) return;
+    const mos = S.moment.filter((m) => MOMENTS.includes(m));
+    const fl = period === 'Wake' ? WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).length : 0;  // v62: a flag alone still saves
+    if (!n && !t && !mos.length && !fl) return;
     const note = S.checkNote.trim(), at = S.time;
-    if (mo) {
-      // A moment is its own entry (kept out of day scores); the note goes with it.
-      commit('moment', { moment: mo, note }, mo + (note ? ' · ' + note : ''));
-      S.time = at;
-    }
-    if (!n && !t) { S.moment = null; S.checkNote = ''; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender(); return; }
+    // Each moment is its own entry (kept out of day scores); the note goes with each.
+    mos.forEach((mo) => { S.time = at; commit('moment', { moment: mo, note }, mo + (note ? ' · ' + note : '')); S.time = at; });
+    if (!n && !t && !fl) { S.moment = []; S.checkNote = ''; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender(); return; }
     const tl = [times.bed ? 'slept ' + times.bed : '', times.wake ? 'woke ' + times.wake : '', times.up ? 'up ' + times.up : ''].filter(Boolean).join(', ');
     const word = stage === 'up' ? 'getting up' : stage === 'bed' ? 'in bed' : period.toLowerCase();
     // Receivers before HealthLog v13 only know "fog" (10 = heavy fog), so send that too until it's updated.
     const sc = Object.assign({}, S.scores);
     if (typeof sc.clarity === 'number') sc.fog = 10 - sc.clarity;
-    const flags = period === 'Wake' ? WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).map(([k]) => (k === 'taste' ? 'bad taste on waking: yes' : 'tinnitus on waking: yes')) : [];
+    const flags = period === 'Wake' ? WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).map(([, , t]) => t) : [];
     const ciNote = (flags.length ? 'Morning: ' + flags.join('; ') + (S.checkNote.trim() ? '. ' : '') : '') + S.checkNote.trim();
     S.wakeFlags = {};
     commit('checkin', { period, stage, scores: sc, note: ciNote, sleep: times },
-      'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : ''), { wake: stage === 'bed', up: stage === 'up' });
-    S.scores = {}; S.checkNote = ''; S.moment = null; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
+      'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : '') + (flags.length ? ' · ' + flags.map((f) => f.replace(' on waking: yes', '')).join(', ') : ''), { wake: stage === 'bed', up: stage === 'up' });
+    S.scores = {}; S.checkNote = ''; S.moment = []; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
   }
   else if (act === 'trial') {
     const t = cfg.trial;
@@ -2394,8 +2396,10 @@ function trendsEnter() {
     $('trends-refresh').onclick = () => spin($('trends-refresh'), trendsLoad);
     $('trends-settings').onclick = () => openSettings();
     el.addEventListener('click', trendsClick);
-    el.addEventListener('mouseover', (e) => { const t = e.target.closest && e.target.closest('[data-tip]'); if (t && t !== TR.tipEl) showTip(t); });
-    el.addEventListener('mouseout', (e) => { const t = e.target.closest && e.target.closest('[data-tip]'); if (t && !(e.relatedTarget && t.contains(e.relatedTarget))) hideTip(); });
+    // v62: on phones a tap also sends mouse events; ignore those for a moment so they can't flash a tooltip over the tap.
+    el.addEventListener('touchstart', () => { TR.touchAt = Date.now(); }, { passive: true });
+    el.addEventListener('mouseover', (e) => { if (Date.now() - (TR.touchAt || 0) < 800) return; const t = e.target.closest && e.target.closest('[data-tip]'); if (t && t !== TR.tipEl) showTip(t); });
+    el.addEventListener('mouseout', (e) => { if (Date.now() - (TR.touchAt || 0) < 800) return; const t = e.target.closest && e.target.closest('[data-tip]'); if (t && !(e.relatedTarget && t.contains(e.relatedTarget))) hideTip(); });
   }
   trendsRender();
   if (Conn.canLog() && (!TR.at || Date.now() - TR.at > 120000)) trendsLoad();
@@ -2806,7 +2810,7 @@ function nightDetail(x) {
 const ACT_KINDS = [['walk', 'Walking'], ['dance', 'Dance'], ['aerial', 'Aerial'], ['cycle', 'Cycling'], ['carry', 'Carrying / lifting'], ['other', 'Other']];
 function activityView(T2) {
   const list = T2.list;
-  const info = infoI('Before the ring (4 Nov): the activities you logged, with the effort you gave (or the usual for that kind of activity). From 4 Nov: Oura’s own light, moderate and hard minutes for the day. Oura’s light minutes are left out (they’re mostly pottering and standing about), so ring days show moderate and hard only, comparable with before the ring. The top figures compare the last 7 days with the average week in the 4 weeks before.');
+  const info = infoI('Active minutes are your activities: before the ring (4 Nov) the ones you logged, with the effort you gave (or the usual for that kind of activity); from 4 Nov Oura’s sessions, which already include what you log in the app. Effort for ring sessions comes from your heart rate minute by minute, so one dance can be part light, part moderate, part hard. Pottering outside sessions isn’t counted. The top figures compare the last 7 days with the average week in the 4 weeks before.');
   let html = '<h2 class="tr-h tr-h-first">Activity' + info + '</h2>';
   if (!list.some((x) => x.d.am || (x.d.oura && x.d.oura.st))) return html + '<p class="small tr-hint">No activity logged yet.</p>';
   const sum = (arr, f) => arr.reduce((t, x) => t + (f(x) || 0), 0);
@@ -2860,11 +2864,22 @@ function activityView(T2) {
     html += '<div class="tr-sub">Steps a day</div>' + sv + '</svg><div class="tr-key"><span><i class="ak" style="background:#a9b7cc"></i>Apple Health (phone)</span><span><i class="ak" style="background:#4a7fd6"></i>Oura ring, from 4 Nov</span></div>';
   }
   // v54: average week over the last 4 weeks, by type.
-  const last28 = list.slice(-28), byKind = ACT_KINDS.map(([k, l]) => [l, Math.round(sum(last28, (x) => (x.d.ak ? x.d.ak[k] : 0)) / 4)]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  // v62: each type's bar is split light / moderate / hard (d.aki, HealthLog v62), so walking and dancing compare.
+  const last28 = list.slice(-28), fmtM = (v) => (v >= 120 ? (v / 60).toFixed(1).replace('.0', '') + ' h' : v + ' min');
+  const byKind = ACT_KINDS.map(([k, l]) => {
+    const tot = sum(last28, (x) => (x.d.ak ? x.d.ak[k] : 0));
+    const sp = [0, 1, 2].map((i) => sum(last28, (x) => (x.d.aki && x.d.aki[k] ? x.d.aki[k][i] : 0)));
+    const known = sp[0] + sp[1] + sp[2];
+    return [l, Math.round(tot / 4), known ? sp.map((v) => (v / known) * (tot / 4)) : null];
+  }).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   if (byKind.length) {
     const top = byKind[0][1];
-    html += '<div class="tr-sub">Average week, by type (last 4 weeks)</div><div class="act-types">' + byKind.map(([l, v]) =>
-      '<div class="at-row"><span>' + esc(l) + '</span><i style="width:' + Math.max(4, Math.round((v / top) * 100)) + '%"></i><b>' + (v >= 120 ? (v / 60).toFixed(1).replace('.0', '') + ' h' : v + ' min') + '</b></div>').join('') + '</div>';
+    html += '<div class="tr-sub">Average week, by type and effort (last 4 weeks)</div><div class="act-types">' + byKind.map(([l, v, sp]) => {
+      const w = Math.max(4, Math.round((v / top) * 100));
+      const bar = sp ? '<i class="at-split" style="width:' + w + '%">' + ['light', 'mod', 'hard'].map((c, i) => (sp[i] > 0 ? '<em class="' + c + '" style="width:' + ((sp[i] / v) * 100).toFixed(1) + '%"></em>' : '')).join('') + '</i>' : '<i style="width:' + w + '%"></i>';
+      const tip = l + ': ' + fmtM(v) + ' a week' + (sp ? ' · ' + ['light', 'moderate', 'hard'].map((n, i) => (Math.round(sp[i]) ? Math.round(sp[i]) + ' min ' + n : '')).filter(Boolean).join(', ') : '');
+      return '<div class="at-row" data-tip="' + esc(tip) + '"><span>' + esc(l) + '</span>' + bar + '<b>' + fmtM(v) + '</b></div>';
+    }).join('') + '</div><div class="tr-key act-key"><span><i class="ak light"></i>Light</span><span><i class="ak mod"></i>Moderate</span><span><i class="ak hard"></i>Hard</span></div>';
   }
   return html + patBtn('activity', 'Activity and symptoms');
 }
@@ -3351,6 +3366,11 @@ function trendsClick(ev) {
   const el = ev.target.closest('[data-tr]');
   if (!el) return;
   const act = el.dataset.tr, v = el.dataset.v;
+  // v62: a phone can deliver one tap as two clicks (the second on the redrawn chart), which opened a night or day
+  // and closed it again at once. The same tap target within 500 ms counts once.
+  const sig = act + '|' + v, now = Date.now();
+  if (TR.lastTap && TR.lastTap.sig === sig && now - TR.lastTap.at < 500) return;
+  TR.lastTap = { sig, at: now };
   if (act === 'day') { TR.sel = TR.sel === v ? null : v; trendsRender(); if (TR.sel) loadDayDetail(TR.sel); }
   else if (act === 'series') {
     TR.on = TR.on.includes(v) ? TR.on.filter((x) => x !== v) : TR.on.concat(v);

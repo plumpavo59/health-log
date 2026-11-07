@@ -80,6 +80,7 @@ a{color:inherit}
 .chip.other{border-style:dashed;border-color:var(--faint);color:var(--muted)}
 .grid7{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
 .grid-size{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 84px;gap:6px}
+.grid-size.grid-pain{grid-template-columns:1fr 1fr;margin-top:6px}
 .sq{min-height:40px;border-radius:10px;font-size:18px;font-weight:650;border:1px solid var(--line);background:var(--card)}
 .trial{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:12px;background:var(--soft)}
 .trial-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12px;letter-spacing:.06em;color:var(--muted)}
@@ -690,6 +691,7 @@ html.share-mode .eyebrow{visibility:hidden}
 .at-row{display:grid;grid-template-columns:118px minmax(0,1fr) 54px;align-items:center;gap:8px;font-size:13.5px}
 .at-row i{display:block;height:10px;border-radius:5px;background:#4a7fd6}
 .at-row b{font-weight:600;text-align:right;font-size:13px}
+.at-row i.at-split{display:flex;overflow:hidden;background:none}.at-split em{display:block;height:100%}.at-split em.light{background:#9cc0ec}.at-split em.mod{background:#4a7fd6}.at-split em.hard{background:#1f4e9c}
 .tr-tabs button{font-size:14px;padding:0 4px}
 .tr-stress-line{fill:none;stroke:#8a5cc2;stroke-width:1.8;stroke-dasharray:4 3}
 .wake-flags{display:flex;gap:8px;justify-content:center;margin:2px 0 12px}
