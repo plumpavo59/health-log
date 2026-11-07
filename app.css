@@ -729,3 +729,4 @@ html.share-mode .eyebrow{visibility:hidden}
 .edit-row{display:flex;align-items:center;gap:10px;margin:0 0 10px}.edit-row span{width:96px;flex:none;color:var(--muted2);font-size:14px}.edit-row input{flex:1;min-width:0}
 .seg.edit-del{width:100%;margin-top:6px;color:#c8463f}.seg.edit-del.on{background:#c8463f;color:#fff;border-color:#c8463f}
 .edit-row input[type=time]{height:44px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font:inherit;color:inherit;background:transparent}
+.tr-act-line{fill:none;stroke:#2a9d8f;stroke-width:1.8;stroke-linejoin:round;opacity:.9}.tr-actdot{fill:#2a9d8f}

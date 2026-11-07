@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v65 · 7 Nov';
+const APP_VERSION = 'v66 · 7 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2767,11 +2767,11 @@ function trendsRender() {
   // v37: the symptom chart comes first, with a title; the day-by-day calendar follows.
   // v54: stress is a line on the main chart (0–5 shown on the 0–10 scale, so 5 sits at the top), toggled like a symptom.
   const series = [{ k: 'load', name: 'Overall' }].concat(TREND_SYMS).concat(T2.list.some((x) => giNum(symVal(x.d, 'x'))) ? [{ k: 'x', name: 'Stress', color: '#8a5cc2' }] : []);
-  let over = '<h2 class="tr-h tr-h-first tr-h-main">All symptoms' + infoI('The main picture. Overall = ' + (T2.parts ? 'the day’s level for the symptoms chosen under Day by day: up-and-about readings averaged within morning, afternoon and evening, then half the average of those parts + half the worst one, so logging more often doesn’t change it.' : 'the day score: the average of that day’s readings for the symptoms chosen under Day by day.') + ' The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Show alongside: Stress (purple dashed; your 0–5 doubled, so 5 = 10) and Activity (light blue bars: steps that day, 10 = 15,000 steps or more; days without a step count have no bar), on the same 0–10 scale so they line up with the symptoms.') + '</h2>';
+  let over = '<h2 class="tr-h tr-h-first tr-h-main">All symptoms' + infoI('The main picture. Overall = ' + (T2.parts ? 'the day’s level for the symptoms chosen under Day by day: up-and-about readings averaged within morning, afternoon and evening, then half the average of those parts + half the worst one, so logging more often doesn’t change it.' : 'the day score: the average of that day’s readings for the symptoms chosen under Day by day.') + ' The dashed grey line is the 7-day average, so you can see the trend. Solid dot = flare day, ring = bad day. Show alongside: Stress (purple dashed; your 0–5 doubled, so 5 = 10) and Activity (teal line, 0–10: activity minutes weighted by effort, light ×1, moderate ×2, hard ×3, plus everyday steps beyond about 3,000 that aren’t already part of a walk; on a curve so a 40-minute walk is about 4 and a big swing night like 5 Nov about 9), on the same 0–10 scale so they line up with the symptoms.') + '</h2>';
   const chip = (s) => '<button type="button" class="tr-chip" data-tr="series" data-v="' + s.k + '" aria-pressed="' + TR.on.includes(s.k) + '">' +
     '<i style="' + (s.k === 'load' ? 'background:var(--ink)' : 'background:' + s.color) + '"></i>' + esc(s.name) + '</button>';
   const symSeries = series.filter((s) => s.k !== 'x');
-  const extra = series.filter((s) => s.k === 'x').concat(T2.list.some((x) => x.d.oura && giNum(x.d.oura.st)) ? [{ k: 'act', name: 'Steps', color: '#4a7fd6' }] : []);
+  const extra = series.filter((s) => s.k === 'x').concat(T2.list.some((x) => actScore(x) !== null) ? [{ k: 'act', name: 'Activity', color: '#2a9d8f' }] : []);
   over += '<div class="tr-chips">' + symSeries.map(chip).join('') + '</div>' +
     (extra.length ? '<div class="tr-chips tr-extra"><span class="tr-extra-l">Show alongside</span>' + extra.map(chip).join('') + '</div>' : '');
   over += trendsChart(T2);
@@ -2892,11 +2892,11 @@ function trendsChart(T2) {
     svg += '<path d="' + path(get) + '" fill="none" stroke="' + s.color + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"' + (s.dash ? ' stroke-dasharray="' + s.dash + '"' : '') + '/>' +
       dots(get, '').replace(/class=""/g, 'fill="' + s.color + '"');
   });
-  // v57: activity on the same 0–10 scale = steps that day: 10 = 15,000 steps or more (Apple Health before the ring, Oura after).
+  // v66: activity score (0–10) as a line: effort-weighted activity minutes plus everyday steps (see actScore).
   if (TR.on.includes('act')) {
-    const ag = (x) => { const v = stepsOf(x); return v === null ? 0 : Math.min(10, v / 1500); };
-    const bw2 = Math.max(2, Math.min(9, (cw / Math.max(1, n - 1)) * 0.7));
-    list.forEach((x, i) => { const v = ag(x); if (v > 0) svg += '<rect x="' + (X(i) - bw2 / 2).toFixed(1) + '" y="' + Y(v).toFixed(1) + '" width="' + bw2.toFixed(1) + '" height="' + (Y(0) - Y(v)).toFixed(1) + '" rx="1" class="tr-act-area"/>'; });
+    let ad = '', pen = false;
+    list.forEach((x, i) => { const v = actScore(x); if (v === null) { pen = false; return; } ad += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); pen = true; });
+    svg += '<path d="' + ad + '" fill="none" class="tr-act-line"/>' + list.map((x, i) => (actScore(x) === null ? '' : '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(actScore(x)).toFixed(1) + '" r="1.8" class="tr-actdot"/>')).join('');
   }
   if (TR.on.includes('x')) {
     const sg = (x) => (stressOf(x) === null ? undefined : stressOf(x) * 2);
@@ -2936,7 +2936,7 @@ function trendsChart(T2) {
   const colW = n > 1 ? cw / (n - 1) : cw;
   list.forEach((x, i) => {
     const vals = TREND_SYMS.filter((sm) => typeof symVal(x.d, sm.k) === 'number').map((sm) => sm.name.toLowerCase() + ' ' + (sm.inv ? Math.round((10 - symVal(x.d, sm.k)) * 10) / 10 : symVal(x.d, sm.k)));
-    const tip = [longDate(x.key), x.load !== null ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') : 'no scores', avg7[i] !== null ? '7-day average ' + avg7[i].toFixed(1) : '', x.flare ? 'flare' : x.badDay ? 'bad day' : '', vals.join(', '), stressOf(x) !== null ? 'stress ' + stressOf(x) + '/5' : '', stepsOf(x) !== null ? stepsOf(x).toLocaleString('en-GB') + ' steps' : '', x.d.am ? x.d.am + ' active min (' + effortCls(x).trim().replace('mod', 'moderate') + ')' : ''].filter(Boolean).join(' · ');
+    const tip = [longDate(x.key), x.load !== null ? 'day score ' + x.load.toFixed(1) + (x.usual !== null ? ' (usual ' + x.usual.toFixed(1) + ')' : '') : 'no scores', avg7[i] !== null ? '7-day average ' + avg7[i].toFixed(1) : '', x.flare ? 'flare' : x.badDay ? 'bad day' : '', vals.join(', '), stressOf(x) !== null ? 'stress ' + stressOf(x) + '/5' : '', actScore(x) !== null ? 'activity ' + actScore(x).toFixed(1) + '/10' : '', stepsOf(x) !== null ? stepsOf(x).toLocaleString('en-GB') + ' steps' : '', x.d.am ? x.d.am + ' active min (' + effortCls(x).trim().replace('mod', 'moderate') + ')' : ''].filter(Boolean).join(' · ');
     svg += '<rect x="' + Math.max(L, X(i) - colW / 2).toFixed(1) + '" y="' + TOP + '" width="' + colW.toFixed(1) + '" height="' + (H - TOP - 10) + '" class="tr-hit" data-tip="' + esc(tip) + '"/>';
   });
   return svg + '</svg>';
@@ -2982,6 +2982,19 @@ function nightDetail(x) {
   if (!d.os && x.key < OURA_FROM) h += '<p class="small">Before the Oura ring: from your own check-ins.</p>';
   return h + '</div>';
 }
+/* v66: one activity number out of 10 per day. Load = activity minutes weighted by effort (light ×1, moderate ×2,
+   hard ×3; logged activity before the ring, Oura sessions' heart-rate bands after) + everyday steps beyond ~3,000
+   not already in a walk (at ~110 steps a minute, counted as light). Score = 2.1 × ln(1 + load / 7), capped at 10:
+   a curve, so a 40-minute walk ≈ 4 and a big swing night (5 Nov) ≈ 9 (Ru, 7 Nov). No steps and no activity = no data. */
+const ACT_SCORE_A = 2.1, ACT_SCORE_B = 7, ACT_BASE_STEPS = 3000, ACT_STEPS_PER_MIN = 110;
+function actLoad(x) {
+  const d = x.d, st = d.oura && giNum(d.oura.st) ? d.oura.st : null;
+  if (!d.al && st === null) return null;
+  const walk = d.ak && d.ak.walk ? d.ak.walk : 0;
+  const stepMin = st === null ? 0 : Math.max(0, (st - ACT_BASE_STEPS) / ACT_STEPS_PER_MIN - walk);
+  return (d.al || 0) + stepMin;
+}
+function actScore(x) { const l = actLoad(x); return l === null ? null : Math.min(10, ACT_SCORE_A * Math.log(1 + l / ACT_SCORE_B)); }
 const ACT_KINDS = [['walk', 'Walking'], ['dance', 'Dance'], ['aerial', 'Aerial'], ['cycle', 'Cycling'], ['carry', 'Carrying / lifting'], ['other', 'Other']];
 function activityView(T2) {
   const list = T2.list;
