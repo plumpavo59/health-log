@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v71 · 8 Nov';
+const APP_VERSION = 'v72 · 8 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -762,12 +762,18 @@ function logRender() {
     if (el) { el.focus({ preventScroll: true }); try { if (keep.a !== null && keep.a !== undefined) el.setSelectionRange(keep.a, keep.b); } catch (e) {} }
   }
 }
+const IMG_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/></svg>';
 const CAM_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
 /* v56: shrink a meal photo to at most 1600 px (JPEG) so it sends quickly. */
 document.addEventListener('change', (ev) => {
   const t = ev.target;
-  if (!t || t.id !== 'food-photo' || !t.files || !t.files[0]) return;
+  if (!t || (t.id !== 'food-photo' && t.id !== 'food-photo-lib') || !t.files || !t.files[0]) return;
   const file = t.files[0];
+  // v72: a photo from the library keeps its own time for the meal (when the phone passes it on and nothing else was chosen).
+  if (t.id === 'food-photo-lib' && !S.time && file.lastModified) {
+    const age = Date.now() - file.lastModified;
+    if (age > 10 * 60000 && age < 3 * 86400000) { S.time = new Date(file.lastModified); toast('Time set from the photo: ' + pad(S.time.getHours()) + ':' + pad(S.time.getMinutes())); }
+  }
   S.photoBusy = true; logRender();
   const img = new Image(), url = URL.createObjectURL(file);
   img.onload = () => {
@@ -977,7 +983,9 @@ function sheetView() {
     // v56: a camera button; the photo goes to Drive › Meal photo logs and the meal is marked to be interpreted later.
     body = (S.foodPhoto ? '<div class="photo-prev"><img src="' + S.foodPhoto + '" alt="Meal photo"><button type="button" class="icon-btn photo-x" data-act="photo-clear" aria-label="Remove photo">' + X_SVG + '</button></div>' : '') +
       '<div class="food-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="' + (S.foodPhoto ? 'Add a description (optional)' : 'What did you eat?') + '" aria-label="What did you eat" autocomplete="off" enterkeyhint="send">' +
-      '<label class="seg cam-btn" aria-label="Take a photo of the meal">' + CAM_SVG + '<input type="file" id="food-photo" accept="image/*" capture="environment"></label></div>' +
+      '<label class="seg cam-btn" aria-label="Take a photo of the meal">' + CAM_SVG + '<input type="file" id="food-photo" accept="image/*" capture="environment"></label>' +
+      // v72: or pick one already taken, from the photo library.
+      '<label class="seg cam-btn" aria-label="Choose a photo from your library">' + IMG_SVG + '<input type="file" id="food-photo-lib" accept="image/*"></label></div>' +
       (S.photoBusy ? '<p class="small">Preparing the photo…</p>' : '') +
       '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div>';
   } else if (S.sheet === 'activity') {
