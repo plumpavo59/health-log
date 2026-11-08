@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v68 · 7 Nov';
+const APP_VERSION = 'v69 · 8 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2786,7 +2786,7 @@ function trendsRender() {
   if (SHARE_ID) html += '<p class="small tr-hint">View-only copy of Ru’s health log. It updates by itself.</p>';
   if (TR.pop) {
     const G = giData();
-    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : /^trialfx/.test(TR.pop || '') ? trialEffectPop(T2, today, TR.pop.includes(':') ? Number(TR.pop.split(':')[1]) : undefined) : TR.pop === 'suppplan' ? suppPlanPop() : null;
+    const pop = TR.pop === 'stomach' ? (G ? stomachPatterns(G, today) : null) : TR.pop === 'activity' ? activityPatterns(T2) : TR.pop === 'sleep' ? sleepPatterns(T2) : TR.pop === 'steps' ? stepsCompare(T2, today) : TR.pop === 'plan' ? { title: 'Plan steps', html: planHtml(today, false, 'list') } : /^trialfx/.test(TR.pop || '') ? trialEffectPop(T2, today, TR.pop.includes(':') ? Number(TR.pop.split(':')[1]) : undefined) : TR.pop === 'suppplan' ? suppPlanPop() : /^medfx:/.test(TR.pop || '') ? medEffect(T2, TR.pop.slice(6)) : null;
     html += patternsPopup(pop);
     TR.popFresh = false;
   }
@@ -3578,7 +3578,117 @@ function medsView(today) {
   }
   html += stats.length ? '<div class="pt-stats tr-medstats">' + stats.map((x) => '<div class="pt-cell"><span>' + esc(x.label) + '</span><b>' + esc(x.value) + '</b><small>' + esc(x.sub) + '</small></div>').join('') + '</div>'
     : '<p class="small">No ' + esc(cur) + ' logged in the last four months.</p>';
+  if (taken.length >= 3 && !d.supps) html += patBtn('medfx:' + cur, 'What ' + cur + ' seems to do');
   return html + '<p class="small tr-hint">Dark = logged' + (d.supps ? ', half = some of the ones due' : d.perDay > 1 ? ', half = some of ' + d.perDay + ' doses' : '') + (d.mg ? ', small number = mg' : '') + '. Counts logged doses only; before 4am counts as the night before.</p>';
+}
+/* v69: "What it seems to do" for each medicine (Meds tab › a medicine › button). Compares days it was taken with days
+   it wasn't, inside the time you were using it (from the first dose to 3 days after the last), on every measure
+   the app has: the six symptoms (up-and-about readings, each part of the day once), day level, stomach, bloating,
+   stress, the night's sleep, activity and bowel. Because other things change too, it also shows what else was
+   different on those days (getting up later, shorter sleep, other medicines taken at the same time) and repeats the
+   comparison among days with a similar getting-up time, so a late start can't pass for a medicine effect.
+   Night medicines (amitriptyline) are judged on the night and the next day; as-needed painkillers are taken
+   because of pain, so their days look worse by design. */
+const MED_NIGHT = /amitriptyline/i, MED_ASNEEDED_PER_DAY = 0;
+function upValDay(x, k) {
+  if (!x || !x.d.pt) return null;
+  const v = PART_UP.map((pt) => x.d.pt[pt] && x.d.pt[pt][k]).filter((y) => typeof y === 'number');
+  return v.length ? v.reduce((t, a) => t + a, 0) / v.length : null;
+}
+function medEffect(T2, name) {
+  const data = medCounts(), d = data && data[name];
+  if (!d) return { title: name, empty: 'No data yet.' };
+  const list = T2.list, by = T2.by, today = T2.today;
+  const night = MED_NIGHT.test(name), asNeeded = d.perDay === MED_ASNEEDED_PER_DAY;
+  const taken = list.filter((x) => d.byDay[x.key] > 0 && x.key < today).map((x) => x.key);
+  const p = { title: name + ': what it seems to do', stats: [], comps: [] };
+  if (taken.length < 3) { p.empty = 'Needs at least 3 days with ' + name + ' logged.'; return p; }
+  const first = taken[0], last = taken[taken.length - 1];
+  const inUse = list.filter((x) => x.key >= first && x.key <= addDays(last, 3) && x.key < today);
+  const on = inUse.filter((x) => d.byDay[x.key] > 0), off = inUse.filter((x) => !(d.byDay[x.key] > 0));
+  // The day whose symptoms count: the same day, or the next for a night medicine. Sleep = the night after the dose.
+  const tgt = (x) => (night ? by[addDays(x.key, 1)] : x);
+  const nightAfter = (x) => by[addDays(x.key, 1)];
+  const G = giData();
+  const upTime = (x) => { const t = tgt(x); return t ? clockMin(t.d.up) : null; };
+  const OUT = [
+    ...TREND_SYMS.map((sm) => ({ name: sm.name.replace('Mental clarity', 'Clarity'), get: (x) => upValDay(tgt(x), sm.k), worse: 1, unit: '' })),
+    { name: 'Day level (all symptoms)', get: (x) => (tgt(x) ? tgt(x).load : null), worse: 1, unit: '' },
+    { name: 'Stomach pain', get: (x) => (tgt(x) && giNum(symVal(tgt(x).d, 'st')) ? symVal(tgt(x).d, 'st') : null), worse: 1, unit: '' },
+    { name: 'Bloating', get: (x) => (tgt(x) && giNum(symVal(tgt(x).d, 'b')) ? symVal(tgt(x).d, 'b') : null), worse: 1, unit: '' },
+    { name: 'Stress', get: (x) => (tgt(x) && giNum(symVal(tgt(x).d, 'x')) ? symVal(tgt(x).d, 'x') : null), worse: 1, unit: '' },
+    { name: 'Sleep quality that night', get: (x) => { const n = nightAfter(x); return n && typeof n.d.q === 'number' ? n.d.q : null; }, worse: -1, unit: '' },
+    { name: 'Hours asleep that night', get: (x) => { const n = nightAfter(x); return n && typeof n.d.sl === 'number' ? n.d.sl : null; }, worse: -1, unit: 'h' },
+    { name: 'Fell asleep that night', get: (x) => { const n = nightAfter(x); return n ? bedMinutes(n.d.bt) : null; }, worse: 0, unit: 'min' },
+    { name: 'Activity (0–10)', get: (x) => (tgt(x) ? actScore(tgt(x)) : null), worse: 0, unit: '' },
+    { name: 'Bowel: Bristol type', get: (x) => { const g = G && G.by[x.key]; return g && Array.isArray(g.bx) && g.bx.length ? mean1(g.bx) : null; }, worse: 0, unit: '' },
+  ];
+  const vals = (arr, f) => arr.map(f).filter((v) => typeof v === 'number' && !isNaN(v));
+  // Same-start comparison: getting-up time in 3 bands, differences averaged across bands that have both kinds of day.
+  const band = (x) => { const u = upTime(x); return u === null ? null : u < 10.5 * 60 + 1440 ? 0 : u < 12.5 * 60 + 1440 ? 1 : 2; };
+  const matched = (f) => {
+    let tot = 0, wsum = 0;
+    [0, 1, 2].forEach((b) => {
+      const A = vals(on.filter((x) => band(x) === b), f), B = vals(off.filter((x) => band(x) === b), f);
+      if (A.length >= 2 && B.length >= 2) { const w = Math.min(A.length, B.length); tot += (mean1(A) - mean1(B)) * w; wsum += w; }
+    });
+    return wsum >= 3 ? tot / wsum : null;
+  };
+  p.stats.push({ label: 'Days taken', value: String(on.length), sub: 'since ' + shortDate(first) });
+  p.stats.push({ label: 'Days without', value: String(off.length), sub: off.length ? 'while using it' : 'none yet' });
+  let h = '';
+  if (asNeeded) h += '<p class="pt-lead">Taken when needed, usually because of pain, so its days look worse by design. The useful rows are the night and the next day.</p>';
+  if (off.length < 3) {
+    h += '<p class="pt-lead">You’ve taken it nearly every day, so there are too few days without it to compare' + (planSteps().some((st) => JSON.stringify(st).toLowerCase().includes(name.toLowerCase())) ? '. The Trials section compares before and after each change.' : '. A planned break (see Trials) is the way to see what it does.') + '</p>';
+  }
+  const rows = OUT.map((o) => {
+    const A = vals(on, o.get), B = vals(off, o.get);
+    if (A.length < 2 || B.length < 2) return null;
+    const diff = mean1(A) - mean1(B), m = matched(o.get);
+    return { o, diff, m, nA: A.length, nB: B.length };
+  }).filter(Boolean);
+  const big = (r) => (r.o.unit === 'min' ? 30 : r.o.unit === 'h' ? 0.5 : 0.7);
+  const fmt = (r, v) => {
+    if (v === null || v === undefined) return '–';
+    const a = Math.abs(v), small = r.o.unit === 'min' ? a < 10 : r.o.unit === 'h' ? a < 0.2 : a < 0.3;
+    if (small) return '≈';
+    const better = r.o.worse === 0 ? null : (v * r.o.worse < 0);
+    const arrow = better === null ? (r.o.unit === 'min' ? '' : v > 0 ? '+' : '−') : better ? '▲ ' : '▼ ';
+    return arrow + (r.o.unit === 'min' ? Math.round(a) + ' min' + (better === null ? (v > 0 ? ' later' : ' earlier') : '') : r.o.unit === 'h' ? a.toFixed(1) + ' h' : a.toFixed(1));
+  };
+  const tone = (r, v) => { if (v === null || r.o.worse === 0) return 'same'; const a = Math.abs(v); if (a < (r.o.unit === 'h' ? 0.2 : 0.3)) return 'same'; return v * r.o.worse < 0 ? 'better' : 'worse'; };
+  const pats = [];
+  rows.forEach((r) => {
+    const solid = r.nA >= 5 && r.nB >= 5 && Math.abs(r.diff) >= big(r) && (r.m === null || (Math.sign(r.m) === Math.sign(r.diff) && Math.abs(r.m) >= big(r) * 0.6));
+    r.solid = solid;
+    if (solid && r.o.worse !== 0) pats.push(r.o.name.toLowerCase() + ' ' + (r.diff * r.o.worse < 0 ? 'better' : 'worse') + (r.m !== null ? ' (also with a similar getting-up time)' : ''));
+  });
+  if (rows.length) {
+    h += '<p class="pt-lead">' + (pats.length ? 'On days with ' + esc(name) + ': <b>' + esc(pats.join('; ')) + '</b>.' : off.length < 3 ? '' : 'Nothing clear yet: no measure differs by enough on enough days.') + '</p>';
+    h += '<table class="pt-table pt-around pt-med"><thead><tr><th></th><th>' + (night ? 'Next day / night' : 'Days taken') + ' vs without</th><th>Same getting-up time</th></tr></thead><tbody>' + rows.map((r) =>
+      '<tr><td>' + esc(r.o.name) + '</td><td class="' + tone(r, r.diff) + (r.solid ? ' top' : '') + '">' + fmt(r, r.diff) + '<small>' + r.nA + ' vs ' + r.nB + ' days</small></td><td class="' + tone(r, r.m) + '">' + fmt(r, r.m) + '</td></tr>').join('') + '</tbody></table>';
+  }
+  // What else was different on those days.
+  const also = [];
+  const upA = vals(on, upTime), upB = vals(off, upTime);
+  if (upA.length >= 2 && upB.length >= 2 && Math.abs(mean1(upA) - mean1(upB)) >= 30) also.push('You got up ' + Math.round(Math.abs(mean1(upA) - mean1(upB))) + ' min ' + (mean1(upA) < mean1(upB) ? 'earlier' : 'later') + ' on days with it (out of bed ' + clockText(mean1(upA)) + ' vs ' + clockText(mean1(upB)) + ').');
+  const slBefore = (x) => { const t = tgt(x); return t && typeof t.d.sl === 'number' ? t.d.sl : null; };
+  const sA = vals(on, slBefore), sB = vals(off, slBefore);
+  if (sA.length >= 2 && sB.length >= 2 && Math.abs(mean1(sA) - mean1(sB)) >= 0.5) also.push('The night before ' + (night ? 'the next day' : 'those days') + ' was ' + Math.abs(mean1(sA) - mean1(sB)).toFixed(1) + ' h ' + (mean1(sA) > mean1(sB) ? 'longer' : 'shorter') + ' on average.');
+  Object.keys(data).filter((k) => k !== name && !data[k].supps).forEach((k) => {
+    const both = on.filter((x) => data[k].byDay[x.key] > 0).length, offBoth = off.filter((x) => data[k].byDay[x.key] > 0).length;
+    if (both >= Math.max(2, on.length * 0.5)) also.push(k + ' was also taken on ' + both + ' of the ' + on.length + ' days' + (off.length ? ' (and ' + offBoth + ' of the ' + off.length + ' days without)' : '') + (both >= on.length * 0.8 ? ', so their effects can’t be told apart here' : '') + '.');
+  });
+  if (also.length) h += '<h3 class="pt-h">Also different on those days</h3><ul class="pt-list">' + also.map((t) => '<li>' + esc(t) + '</li>').join('') + '</ul>';
+  // Since starting, if the first dose is inside the data and there are 2+ weeks before it.
+  const before = list.filter((x) => x.key < first && x.key >= addDays(first, -28) && x.load !== null), after = list.filter((x) => x.key >= addDays(first, 3) && x.key <= addDays(last, 1) && x.load !== null);
+  if (before.length >= 10 && after.length >= 7) {
+    const dv = avgLoad(after) - avgLoad(before);
+    h += '<h3 class="pt-h">Since starting (' + shortDate(first) + ')</h3><p class="small">Day level ' + avgLoad(after).toFixed(1) + ' while taking it vs ' + avgLoad(before).toFixed(1) + ' in the 4 weeks before (' + (Math.abs(dv) < 0.3 ? 'about the same' : Math.abs(dv).toFixed(1) + ' ' + (dv < 0 ? 'better' : 'worse')) + '; ' + after.length + ' vs ' + before.length + ' days). Other changes in that time count too.</p>';
+  }
+  p.html = h;
+  p.note = '▲ better, ▼ worse than days without it; + / − = higher / lower where neither is better. "Same getting-up time" compares only days with a similar time out of bed (before 10:30, 10:30–12:30, later), so a late start or a long lie-in doesn’t pass for the medicine. A pattern is only named from 5+ days each way with a clear difference that also holds with a similar getting-up time. Logged doses only: an unlogged dose counts as a day without. Patterns, not proof; check changes with your doctor or pharmacist.';
+  return p;
 }
 /* Sleep: averages, then the next day's score after early vs late, long vs short, good vs poor nights. */
 function sleepPatterns(T2) {
