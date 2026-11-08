@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v69 · 8 Nov';
+const APP_VERSION = 'v70 · 8 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -3578,7 +3578,7 @@ function medsView(today) {
   }
   html += stats.length ? '<div class="pt-stats tr-medstats">' + stats.map((x) => '<div class="pt-cell"><span>' + esc(x.label) + '</span><b>' + esc(x.value) + '</b><small>' + esc(x.sub) + '</small></div>').join('') + '</div>'
     : '<p class="small">No ' + esc(cur) + ' logged in the last four months.</p>';
-  if (taken.length >= 3 && !d.supps) html += patBtn('medfx:' + cur, 'What ' + cur + ' seems to do');
+  if (taken.length >= 3) html += patBtn('medfx:' + cur, 'What ' + (d.supps ? 'supplements seem' : cur + ' seems') + ' to do');
   return html + '<p class="small tr-hint">Dark = logged' + (d.supps ? ', half = some of the ones due' : d.perDay > 1 ? ', half = some of ' + d.perDay + ' doses' : '') + (d.mg ? ', small number = mg' : '') + '. Counts logged doses only; before 4am counts as the night before.</p>';
 }
 /* v69: "What it seems to do" for each medicine (Meds tab › a medicine › button). Compares days it was taken with days
@@ -3590,6 +3590,11 @@ function medsView(today) {
    Night medicines (amitriptyline) are judged on the night and the next day; as-needed painkillers are taken
    because of pain, so their days look worse by design. */
 const MED_NIGHT = /amitriptyline/i, MED_ASNEEDED_PER_DAY = 0;
+/* v70: which medicines' absence before the first dose means "not taken" (Ru, 8 Nov). Never taken before the trials:
+   every earlier day is a day without. Logged in the older logs too (codeine → Co-codamol): earlier days count.
+   Others (Elvanse, probiotic, paracetamol, supplements) weren't reliably logged before, so only gaps while in use
+   count. Older logs = before 8 Oct (imports from the paper / Bearable / old Daily records); a chip turns them off. */
+const MED_NEVER_BEFORE = /^(celecoxib|omeprazole|amitriptyline)$/i, MED_LOGGED_BEFORE = /^co-codamol$/i, OLD_LOGS_BEFORE = '2026-10-08';
 function upValDay(x, k) {
   if (!x || !x.d.pt) return null;
   const v = PART_UP.map((pt) => x.d.pt[pt] && x.d.pt[pt][k]).filter((y) => typeof y === 'number');
@@ -3604,8 +3609,12 @@ function medEffect(T2, name) {
   const p = { title: name + ': what it seems to do', stats: [], comps: [] };
   if (taken.length < 3) { p.empty = 'Needs at least 3 days with ' + name + ' logged.'; return p; }
   const first = taken[0], last = taken[taken.length - 1];
-  const inUse = list.filter((x) => x.key >= first && x.key <= addDays(last, 3) && x.key < today);
+  const priorOk = MED_NEVER_BEFORE.test(name) || MED_LOGGED_BEFORE.test(name);
+  const useOld = TR.medOld !== false;
+  const hasData = (x) => x.load !== null || (x.d.pt && Object.keys(x.d.pt).length);
+  const inUse = list.filter((x) => (priorOk ? true : x.key >= first) && x.key <= addDays(last, 3) && x.key < today && (useOld || x.key >= OLD_LOGS_BEFORE) && hasData(x));
   const on = inUse.filter((x) => d.byDay[x.key] > 0), off = inUse.filter((x) => !(d.byDay[x.key] > 0));
+  const offOld = off.filter((x) => x.key < OLD_LOGS_BEFORE).length, offBefore = off.filter((x) => x.key < first).length;
   // The day whose symptoms count: the same day, or the next for a night medicine. Sleep = the night after the dose.
   const tgt = (x) => (night ? by[addDays(x.key, 1)] : x);
   const nightAfter = (x) => by[addDays(x.key, 1)];
@@ -3635,8 +3644,11 @@ function medEffect(T2, name) {
     return wsum >= 3 ? tot / wsum : null;
   };
   p.stats.push({ label: 'Days taken', value: String(on.length), sub: 'since ' + shortDate(first) });
-  p.stats.push({ label: 'Days without', value: String(off.length), sub: off.length ? 'while using it' : 'none yet' });
-  let h = '';
+  p.stats.push({ label: 'Days without', value: String(off.length), sub: !off.length ? 'none yet' : offBefore ? offBefore + ' before starting' + (offOld ? ', ' + offOld + ' from older logs' : '') : 'while using it' });
+  let h = '<div class="tr-chips tr-lag"><button type="button" class="tr-chip" data-tr="medold" aria-pressed="' + useOld + '">Include older logs (before 8 Oct)</button></div>';
+  if (!priorOk) h += '<p class="small">' + esc(name) + ' wasn’t reliably logged before you started, so only days without it since then count.</p>';
+  else if (offBefore) h += '<p class="small">' + (MED_NEVER_BEFORE.test(name) ? 'You hadn’t taken it before ' + shortDate(first) + ', so every earlier logged day counts as a day without.' : 'It was logged in the older records too, so earlier days without it count.') + (offOld ? ' ' + offOld + ' of those are from the older logs (paper / Bearable / old daily sheet: fewer check-ins, some symptoms not rated), so treat them as rougher.' : '') + '</p>';
+  if (d.supps) h += '<p class="pt-lead">Supplements (B12, D3 and the rest) mostly work over weeks, not day to day, so this table is unlikely to show much; the useful view comes after a month or two of steady use.</p>';
   if (asNeeded) h += '<p class="pt-lead">Taken when needed, usually because of pain, so its days look worse by design. The useful rows are the night and the next day.</p>';
   if (off.length < 3) {
     h += '<p class="pt-lead">You’ve taken it nearly every day, so there are too few days without it to compare' + (planSteps().some((st) => JSON.stringify(st).toLowerCase().includes(name.toLowerCase())) ? '. The Trials section compares before and after each change.' : '. A planned break (see Trials) is the way to see what it does.') + '</p>';
@@ -3677,12 +3689,12 @@ function medEffect(T2, name) {
   if (sA.length >= 2 && sB.length >= 2 && Math.abs(mean1(sA) - mean1(sB)) >= 0.5) also.push('The night before ' + (night ? 'the next day' : 'those days') + ' was ' + Math.abs(mean1(sA) - mean1(sB)).toFixed(1) + ' h ' + (mean1(sA) > mean1(sB) ? 'longer' : 'shorter') + ' on average.');
   Object.keys(data).filter((k) => k !== name && !data[k].supps).forEach((k) => {
     const both = on.filter((x) => data[k].byDay[x.key] > 0).length, offBoth = off.filter((x) => data[k].byDay[x.key] > 0).length;
-    if (both >= Math.max(2, on.length * 0.5)) also.push(k + ' was also taken on ' + both + ' of the ' + on.length + ' days' + (off.length ? ' (and ' + offBoth + ' of the ' + off.length + ' days without)' : '') + (both >= on.length * 0.8 ? ', so their effects can’t be told apart here' : '') + '.');
+    if (both >= Math.max(2, on.length * 0.5)) also.push(k + ' was also taken on ' + both + ' of the ' + on.length + ' days' + (off.length ? ' (and ' + offBoth + ' of the ' + off.length + ' days without)' : '') + (both >= on.length * 0.8 ? ', so their effects can’t be told apart here' : '') + '.' + (offOld && !(MED_NEVER_BEFORE.test(k) || MED_LOGGED_BEFORE.test(k)) ? ' (The older logs don’t record ' + k + ', so it may have been taken on some of those days too.)' : ''));
   });
   if (also.length) h += '<h3 class="pt-h">Also different on those days</h3><ul class="pt-list">' + also.map((t) => '<li>' + esc(t) + '</li>').join('') + '</ul>';
   // Since starting, if the first dose is inside the data and there are 2+ weeks before it.
   const before = list.filter((x) => x.key < first && x.key >= addDays(first, -28) && x.load !== null), after = list.filter((x) => x.key >= addDays(first, 3) && x.key <= addDays(last, 1) && x.load !== null);
-  if (before.length >= 10 && after.length >= 7) {
+  if (!priorOk && before.length >= 10 && after.length >= 7) {
     const dv = avgLoad(after) - avgLoad(before);
     h += '<h3 class="pt-h">Since starting (' + shortDate(first) + ')</h3><p class="small">Day level ' + avgLoad(after).toFixed(1) + ' while taking it vs ' + avgLoad(before).toFixed(1) + ' in the 4 weeks before (' + (Math.abs(dv) < 0.3 ? 'about the same' : Math.abs(dv).toFixed(1) + ' ' + (dv < 0 ? 'better' : 'worse')) + '; ' + after.length + ' vs ' + before.length + ' days). Other changes in that time count too.</p>';
   }
@@ -3746,6 +3758,7 @@ function trendsClick(ev) {
   else if (act === 'night') { TR.night = TR.night === v ? null : v; trendsRender(); }
   else if (act === 'actlag') { TR.actLag = Number(v); trendsRender(); }
   else if (act === 'actgroup') { TR.actGroup = v; trendsRender(); }
+  else if (act === 'medold') { TR.medOld = TR.medOld === false; trendsRender(); }
   else if (act === 'sec') { TR.sec = v; TR.pop = null; LS.set('trends.sec', v); trendsRender(); const tabs = document.querySelector('.tr-tabs'); if (tabs && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView(); }
   else if (act === 'pat-close') closePatterns();
   else if (act === 'pair') openSettings('pair');
