@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v72 · 8 Nov';
+const APP_VERSION = 'v73 · 10 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -359,7 +359,7 @@ const upToday = () => !!(cfg.today && cfg.today.upAt) || recent.some((r) => r.hd
 function guessPeriod() {
   const now = new Date(), h = now.getHours(), mins = h * 60 + now.getMinutes();
   if (mins >= 23 * 60 + 30 || h < 4) return 'Bed';
-  if (h < 14 && !upToday()) return 'Wake';
+  if (h < 12 && !upToday()) return 'Wake';  // v73: was before 14:00; a late start no longer turns a check-in into a wake one
   return 'Day';
 }
 const guessStage = () => (wokeToday() ? 'up' : 'bed');
@@ -664,6 +664,29 @@ function calendarView(name, d, today, cls) {
     '<div class="cal-sum">Dark = logged' + (d.mg ? ' · small number = mg that day (? = dose not recorded)' : '') + (d.supps ? ' · half = some of the ones due (Default on the Meds tab)' : d.perDay > 1 ? ' · half = some of ' + d.perDay + ' doses' : '') + ' · before 4am counts as the night before</div></div>';
 }
 
+/* v73: Into bed / Out of bed, separate from check-ins. One tap opens a small window with the time (now, or type
+   the real time later, e.g. "got up 09:30" logged at 15:00); a time already logged opens to change it. Saved as a
+   Check-in row (Period Bed / Getting up, no ratings), which the Oura script and the app read as in bed / out of bed. */
+function sleepMarks() {
+  const m = (cfg.today && cfg.today.sleepMarks) || {}, out = { bed: null, up: null };
+  const now = Date.now();
+  if (m.bed && now - m.bed.t < 12 * 3600000) out.bed = m.bed;  // a bed time from more than 12 h ago is last night's, not tonight's
+  if (m.up) out.up = m.up;
+  recent.forEach((r) => {
+    if (r.status === 'failed' || !r.sleepMark) return;
+    const t = new Date(r.at).getTime(), mk = { hm: r.hm, t, local: true };
+    if (r.sleepMark === 'bed' && now - t < 12 * 3600000 && (!out.bed || t > out.bed.t)) out.bed = mk;
+    if (r.sleepMark === 'up' && now - t < 20 * 3600000 && (!out.bed || t > out.bed.t) && (!out.up || out.up.local)) out.up = out.up && !out.up.local ? out.up : mk;
+  });
+  if (out.up && out.bed && out.up.t < out.bed.t) out.up = null;
+  return out;
+}
+function sleepCardView() {
+  const m = sleepMarks();
+  const btn = (k, label) => '<button type="button" class="seg sleep-mark' + (m[k] ? ' done' : '') + '" data-act="sleep-open" data-v="' + k + '">' + label +
+    '<small>' + (m[k] ? m[k].hm + (m[k].row ? ' · change' : '') : 'tap to log') + '</small></button>';
+  return '<section class="card sleep-card" aria-label="Sleep times"><div class="grid2">' + btn('bed', 'Into bed') + btn('up', 'Out of bed') + '</div></section>';
+}
 function checkinView() {
   const period = S.period || guessPeriod();
   const last = cfg.today.lastCheckin ? 'Last: ' + cfg.today.lastCheckin.toLowerCase() : 'None yet today';
@@ -744,7 +767,7 @@ function logRender() {
     head('') +
     // The time pill floats at the top while you scroll; the panel opens here, or inside a sheet when one is open.
     '<div class="time-bar">' + timePill(timeLabel) + '</div>' + (S.timeOpen && !S.sheet ? timePanel(now) : '') +
-    trialView() + logInboxView() + checkinView() + quickView() +
+    trialView() + logInboxView() + checkinView() + sleepCardView() + quickView() +
     (waiting ? '<div class="queue-note"><span>' + waiting + ' waiting to send</span><button type="button" class="link-btn" data-act="flush">Send now</button></div>' : '') +
     // v49: Logged today is folded by default; just-logged entries (with Undo) and problems still show.
     (rows.length || failed.length ? '<section class="recent" aria-label="Logged today"><button type="button" class="recent-toggle" data-act="logged-toggle" aria-expanded="' + !!S.loggedOpen + '"><h2>LOGGED TODAY <span class="rc-n">' + rows.length + '</span></h2><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>' + missingRows().map((m) =>
@@ -940,7 +963,7 @@ function quickView() {
 }
 function sheetView() {
   if (!S.sheet || !Conn.canLog()) return '';
-  const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity', moment: 'Moment', plan: 'Medication plan', edit: 'Edit entry' }[S.sheet];
+  const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity', moment: 'Moment', plan: 'Medication plan', edit: 'Edit entry', sleep: S.sleepEdit && S.sleepEdit.mark === 'up' ? 'Out of bed' : 'Into bed' }[S.sheet];
   let body = '', btn = '';
   if (S.sheet === 'meds') {
     const sup = suppList();
@@ -967,6 +990,11 @@ function sheetView() {
     body = '<div class="chips">' + MOMENTS.map((m) => '<button type="button" class="chip" data-act="moment-pick" data-v="' + m + '" aria-pressed="' + S.moment.includes(m) + '"><b>' + m + '</b></button>').join('') + '</div>' +
       '<input type="text" id="moment-note" data-field="momentNote" value="' + esc(S.momentNote) + '" placeholder="Note (optional)" aria-label="Moment note" autocomplete="off" enterkeyhint="send">' +
       '<p class="small">For moments that stand out. Kept separate from your day scores. Tracking since 29 Oct.</p>';
+  } else if (S.sheet === 'sleep') {
+    const E = S.sleepEdit || {};
+    btn = '<button type="button" class="log" data-act="sleep-save"' + (E.busy ? ' disabled' : '') + '>' + (E.row ? 'Save' : 'Log') + '</button>';
+    body = '<label class="edit-row"><span>' + (E.mark === 'up' ? 'Got out of bed at' : 'Got into bed at') + '</span><input type="time" data-field="sleepTime" value="' + esc(S.sleepTime || '') + '"></label>' +
+      '<p class="small">' + (E.row ? 'Changes the time already logged.' : 'A time later than now counts as yesterday.') + (E.error ? ' <b>' + esc(E.error) + '</b>' : '') + '</p>';
   } else if (S.sheet === 'edit') {
     // v64: change the time (and the words of a meal, activity or note), or delete. Needs HealthLog v64.
     const E = S.edit || {};
@@ -1001,7 +1029,7 @@ function sheetView() {
   const now = new Date();
   const label = S.time ? (dayKey(S.time) === dayKey(now) ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time) : 'Now · ' + hm(now);
   if (S.sheet === 'food' || S.sheet === 'activity' || S.sheet === 'bowel') body += todayListHtml(S.sheet);
-  const when = S.sheet === 'plan' || S.sheet === 'edit' ? '' : '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
+  const when = S.sheet === 'plan' || S.sheet === 'edit' || S.sheet === 'sleep' ? '' : '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
   return '<div class="sheet-backdrop' + (S.sheetFresh ? ' fresh' : '') + '" data-act="sheet-close"></div>' +
     '<div class="sheet' + (S.sheetFresh ? ' fresh' : '') + '" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">' +
     '<div class="sheet-grab" aria-hidden="true"></div><div class="sheet-head"><h2 id="sheet-title">' + title + '</h2>' + btn +
@@ -1388,6 +1416,30 @@ function logAct(el) {
     openSheet('edit');
   }
   else if (act === 'edit-save') { editSend('save'); }
+  else if (act === 'sleep-open') {
+    const mk = sleepMarks()[v], now = new Date();
+    S.sleepEdit = { mark: v, row: mk && mk.row ? mk.row : null, t: mk ? mk.t : null, hm: mk ? mk.hm : '' };
+    S.sleepTime = mk ? mk.hm : pad(now.getHours()) + ':' + pad(now.getMinutes());
+    openSheet('sleep');
+  }
+  else if (act === 'sleep-save') {
+    const E = S.sleepEdit;
+    if (!E || !/^\d{2}:\d{2}$/.test(S.sleepTime || '')) return;
+    if (E.row) {
+      if (S.sleepTime === E.hm) { closeSheet(); return; }
+      S.edit = { row: E.row, t: E.t, kind: 'checkin', text: '', hm: E.hm };
+      S.editTime = S.sleepTime; S.editText = '';
+      E.busy = true; logRender();
+      editSend('save').then(() => { if (S.edit) { E.busy = false; E.error = S.edit.error || 'Didn’t save. Try again.'; S.edit = null; logRender(); } else S.sleepEdit = null; });
+      return;
+    }
+    const [hh, mm] = S.sleepTime.split(':').map(Number), d = new Date();
+    d.setHours(hh, mm, 0, 0);
+    if (d.getTime() > Date.now() + 5 * 60000) d.setDate(d.getDate() - 1);
+    S.time = d;
+    commit('sleepmark', { mark: E.mark }, (E.mark === 'up' ? 'Out of bed ' : 'Into bed ') + S.sleepTime, E.mark === 'up' ? { up: true, sleepMark: 'up' } : { sleepMark: 'bed' });
+    S.sleepEdit = null; closeSheet();
+  }
   else if (act === 'edit-delete') {
     if (!S.edit) return;
     if (!S.edit.confirm) { S.edit.confirm = true; logRender(); return; }
