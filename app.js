@@ -1941,9 +1941,10 @@ const isTop = (t) => taskPrio(t) === 4;
 function renderTasks() {
   $('focus').replaceChildren(); $('extra').replaceChildren();
   const all = T.tasks.concat(carriedTasks());
-  let core = all.filter((t) => !t.optional);
-  const extra = all.filter((t) => t.optional);
-  const top = T.manual ? [] : core.filter(isTop);
+  // A red flag wins over the optional label: a P1 task shows under Priority even if it's labelled optional.
+  const top = T.manual ? [] : all.filter(isTop);
+  let core = all.filter((t) => !t.optional || top.indexOf(t) >= 0);
+  const extra = all.filter((t) => t.optional && top.indexOf(t) < 0);
   if (!T.manual) core = core.map((t, i) => [t, i]).sort((a, b) => taskPrio(b[0]) - taskPrio(a[0]) || a[1] - b[1]).map((x) => x[0]);
   if (top.length) {
     const head = (txt) => { const h = document.createElement('h2'); h.className = 'task-tier'; h.textContent = txt; return h; };
