@@ -773,3 +773,8 @@ html.share-mode .eyebrow{visibility:hidden}
 #bc-type input{flex:1;min-width:0;font-size:16px;padding:10px 12px;border-radius:10px;border:1px solid #444;background:#111;color:#fff}
 #bc-type .seg{background:#222;color:#fff;border-color:#444;padding:0 14px}
 #bc-wrap::after{content:'';position:absolute;left:6%;right:6%;top:50%;height:2px;background:rgba(255,60,60,.8);pointer-events:none}
+/* v83 barcode: how much, and start again */
+.bc-amt{margin-top:10px}.bc-amt>span{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--ink,inherit)}
+.bc-amt .chips{display:flex;flex-wrap:wrap;gap:6px}.bc-amt .chip{font-size:13px;padding:6px 10px;min-height:34px}
+.bc-amt .bc-grams{margin-top:8px;width:140px}
+.bc-actions{display:flex;gap:18px;margin-top:10px}

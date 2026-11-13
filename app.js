@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v82 · 13 Nov';
+const APP_VERSION = 'v83 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -922,19 +922,25 @@ async function barcodeLookup(code) {
   let res = null;
   try {
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 9000);
-    const r = await fetch('https://world.openfoodfacts.org/api/v2/product/' + code + '.json?fields=product_name,product_name_en,brands,quantity,ingredients_text_en,ingredients_text', { signal: ctl.signal });
+    const r = await fetch('https://world.openfoodfacts.org/api/v2/product/' + code + '.json?fields=product_name,product_name_en,brands,quantity,product_quantity,serving_size,serving_quantity,ingredients_text_en,ingredients_text', { signal: ctl.signal });
     clearTimeout(timer);
     const j = await r.json().catch(() => null);
     const p = j && j.status === 1 && j.product;
     if (p && (p.product_name_en || p.product_name)) {
       const brand = String(p.brands || '').split(',')[0].trim();
+      const gnum = (v) => { const n = Number(v); return isFinite(n) && n > 0 && n < 10000 ? Math.round(n) : 0; };
       res = { code, status: 'found', name: String(p.product_name_en || p.product_name).trim(), brand, qty: String(p.quantity || '').trim(),
+        packG: gnum(p.product_quantity), servG: gnum(p.serving_quantity), serving: String(p.serving_size || '').trim(),
         ingredients: String(p.ingredients_text_en || p.ingredients_text || '').replace(/\s+/g, ' ').replace(/_/g, '').trim() };
     } else res = { code, status: r.ok || r.status === 404 ? 'missing' : 'error' };
   } catch (e) { res = { code, status: 'error' }; }
   if (!S.barcode || S.barcode.code !== code) return;  // cleared or replaced meanwhile
   S.barcode = res;
-  if (res.status === 'found' && !S.food.trim()) S.food = res.name + (res.brand && res.name.toLowerCase().indexOf(res.brand.toLowerCase()) < 0 ? ' (' + res.brand + ')' : '');
+  if (res.status === 'found') {
+    res.base = res.name + (res.brand && res.name.toLowerCase().indexOf(res.brand.toLowerCase()) < 0 ? ' (' + res.brand + ')' : '');
+    if (!S.food.trim()) S.food = res.base;
+  }
+  S.bcAmt = null; S.bcGrams = '';
   logRender();
   if (res.status !== 'found') { const f = $('food-input'); if (f) f.focus(); }
 }
@@ -943,13 +949,38 @@ function barcodeView() {
   if (!b) return '';
   const x = '<button type="button" class="icon-btn bc-x" data-act="barcode-clear" aria-label="Remove barcode">' + X_SVG + '</button>';
   if (b.status === 'looking') return '<div class="bc-card"><span>Barcode ' + esc(b.code) + ' · looking it up…</span>' + x + '</div>';
-  if (b.status === 'found') return '<div class="bc-card found"><div><b>' + esc(b.name) + '</b>' + (b.brand || b.qty ? '<small>' + esc([b.brand, b.qty].filter(Boolean).join(' · ')) + '</small>' : '') +
-    (b.ingredients ? '<small class="bc-ing">' + esc(b.ingredients) + '</small>' : '<small>No ingredients listed</small>') + '</div>' + x + '</div>';
+  if (b.status === 'found') {
+    // v83: how much was eaten. Portion and pack sizes come from Open Food Facts when it has them.
+    const chips = bcAmounts(b).map((a) => '<button type="button" class="chip" data-act="bc-amt" data-v="' + a.key + '" aria-pressed="' + (S.bcAmt === a.key) + '">' + esc(a.label) + '</button>').join('') +
+      '<button type="button" class="chip" data-act="bc-amt" data-v="g" aria-pressed="' + (S.bcAmt === 'g') + '">Grams…</button>';
+    return '<div class="bc-card found"><div><b>' + esc(b.name) + '</b>' + (b.brand || b.qty ? '<small>' + esc([b.brand, b.qty].filter(Boolean).join(' · ')) + '</small>' : '') +
+      (b.ingredients ? '<small class="bc-ing">' + esc(b.ingredients) + '</small>' : '<small>No ingredients listed</small>') +
+      '<div class="bc-amt"><span>How much?</span><div class="chips">' + chips + '</div>' +
+      (S.bcAmt === 'g' ? '<input type="text" inputmode="decimal" class="edit-text bc-grams" data-field="bcGrams" maxlength="6" placeholder="Grams eaten" value="' + esc(S.bcGrams || '') + '">' : '') + '</div>' +
+      '<div class="bc-actions"><button type="button" class="link-btn" data-act="barcode-rescan">Scan again</button><button type="button" class="link-btn" data-act="barcode-clear">Clear</button></div></div></div>';
+  }
   return '<div class="bc-card"><span>' + (b.status === 'missing' ? 'Barcode ' + esc(b.code) + ' isn’t in Open Food Facts. Type what it is; the barcode is kept.' : 'Couldn’t look up barcode ' + esc(b.code) + ' (no connection?). Type what it is; the barcode is kept.') + '</span>' + x + '</div>';
+}
+function bcAmounts(b) {
+  const out = [];
+  if (b.servG && (!b.packG || b.servG < b.packG)) {
+    out.push({ key: 's1', label: '1 portion (' + b.servG + ' g)', g: b.servG, text: b.servG + ' g (1 portion)' });
+    if (!b.packG || b.servG * 2 < b.packG) out.push({ key: 's2', label: '2 portions (' + b.servG * 2 + ' g)', g: b.servG * 2, text: b.servG * 2 + ' g (2 portions)' });
+  } else if (b.packG) out.push({ key: 'half', label: 'Half (' + Math.round(b.packG / 2) + ' g)', g: Math.round(b.packG / 2), text: Math.round(b.packG / 2) + ' g (half the pack)' });
+  out.push({ key: 'all', label: 'Whole pack' + (b.packG ? ' (' + b.packG + ' g)' : ''), g: b.packG, text: (b.packG ? b.packG + ' g ' : '') + '(whole pack)' });
+  return out;
+}
+/* The amount chosen, as words for the meal: "40 g (1 portion)". */
+function bcAmountText(b) {
+  if (!b || b.status !== 'found' || !S.bcAmt) return '';
+  if (S.bcAmt === 'g') { const n = Number(String(S.bcGrams || '').replace(',', '.')); return isFinite(n) && n > 0 ? Math.round(n * 10) / 10 + ' g' : ''; }
+  const a = bcAmounts(b).find((x) => x.key === S.bcAmt);
+  return a ? a.text : '';
 }
 function barcodeNote(b) {
   if (!b) return '';
-  const head = 'Barcode ' + b.code + (b.status === 'found' ? ' · Open Food Facts' + (b.brand ? ': ' + b.brand : '') + (b.qty ? ', ' + b.qty : '') : b.status === 'missing' ? ' · not in Open Food Facts' : '');
+  const amt = bcAmountText(b);
+  const head = 'Barcode ' + b.code + (b.status === 'found' ? ' · Open Food Facts' + (b.brand ? ': ' + b.brand : '') + (b.qty ? ', pack ' + b.qty : '') + (b.serving ? ', portion ' + b.serving : '') + (amt ? ' · ate ' + amt : '') : b.status === 'missing' ? ' · not in Open Food Facts' : '');
   if (b.status !== 'found' || !b.ingredients) return head;
   const room = 490 - head.length - 16;
   return head + ' · Ingredients: ' + (b.ingredients.length > room ? b.ingredients.slice(0, room - 1) + '…' : b.ingredients);
@@ -1216,6 +1247,8 @@ function closeSheet() {
   S.sheet = null;
   // v39: closing a window drops whatever was selected in it (typed text is kept).
   if (BC.scanner || BC.busy) barcodeScanClose();
+  if (S.barcode && S.barcode.base && S.food.trim() === S.barcode.base) S.food = '';  // v83: a scanned product doesn't linger
+  S.bcAmt = null; S.bcGrams = '';
   S.foodPhoto = null; S.barcode = null; S.meds = []; S.doses = {}; S.suppOn = false; S.supps = []; S.bristol = null; S.size = null; S.urgent = false; S.bpain = '';
   S.actType = null; S.actMin = null; S.actEffort = null; S.actMinText = ''; S.moment = [];
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -1643,13 +1676,21 @@ function logAct(el) {
     const food = S.food.trim(), photo = S.foodPhoto, b = S.barcode;
     if (!food && !photo) { if (b && b.status !== 'looking') { const f = $('food-input'); if (f) f.focus(); } return; }
     if (photo) commit('food', { food, photo }, 'Meal photo' + (food ? ' · ' + food : ''));
-    else if (b && b.status !== 'looking') commit('food', { food, note: barcodeNote(b) }, food);  // v81: barcode and ingredients go in Notes
+    else if (b && b.status !== 'looking') {  // v81: barcode and ingredients go in Notes; v83: the amount goes with the meal words
+      const amt = bcAmountText(b), words = amt && food.indexOf(amt) < 0 ? food + ' · ' + amt : food;
+      commit('food', { food: words, note: barcodeNote(b) }, words);
+    }
     else commit('food', { food }, food);
     S.food = ''; S.foodPhoto = null; S.barcode = null; closeSheet();
   }
   else if (act === 'photo-clear') { S.foodPhoto = null; logRender(); }
   else if (act === 'barcode-scan') { barcodeScanOpen(); }
-  else if (act === 'barcode-clear') { if (S.barcode && S.barcode.status === 'found' && S.food === S.barcode.name + (S.barcode.brand ? ' (' + S.barcode.brand + ')' : '')) S.food = ''; S.barcode = null; logRender(); }
+  else if (act === 'barcode-clear' || act === 'barcode-rescan') {  // v83: start again (the product's words go too)
+    if (S.barcode && S.barcode.base && S.food.trim() === S.barcode.base) S.food = '';
+    S.barcode = null; S.bcAmt = null; S.bcGrams = ''; logRender();
+    if (act === 'barcode-rescan') barcodeScanOpen();
+  }
+  else if (act === 'bc-amt') { S.bcAmt = S.bcAmt === v ? null : v; logRender(); if (v === 'g') { const g = document.querySelector('#sheet .bc-grams'); if (g) g.focus(); } }
   else if (act === 'checkin') {
     const period = S.period || guessPeriod();
     const stage = period === 'Wake' ? (S.stage || guessStage()) : '';
