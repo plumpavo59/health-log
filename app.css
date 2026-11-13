@@ -784,3 +784,9 @@ html.share-mode .eyebrow{visibility:hidden}
 .bc-grams-row span{font-size:14px;color:var(--text2);flex:1}
 #sheet .bc-grams-row input.bc-grams{width:96px;min-width:0;flex:0 0 96px}
 #sheet .bc-grams-row span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* v85 watch list in the check-in */
+.watch{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px dashed var(--line2,var(--line));border-radius:12px}
+.watch-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.watch-row>span{font-size:14px;font-weight:600}
+.watch-btns{display:flex;gap:6px}
+.watch .small{margin:0}

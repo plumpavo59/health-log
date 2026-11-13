@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v84 · 13 Nov';
+const APP_VERSION = 'v85 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -373,7 +373,7 @@ const S = {
   bristol: null, size: null, urgent: false, bpain: '', bowelNote: '',
   meds: [], doses: {}, food: '', time: null, timeOpen: false,
   sheet: null, sheetFresh: false, refreshing: false, inboxText: '', inboxStatus: '', dirty: false,
-  sleepT: { bed: '', wake: '', up: '' }, wakeFlags: {},
+  sleepT: { bed: '', wake: '', up: '' }, wakeFlags: {}, watch: {},
   actText: '', actType: null, actMin: null, actEffort: null
 };
 const ACT_TYPES = ['Walk', 'Dance', 'Aerial', 'Cycle', 'Carrying/lifting', 'Other'];
@@ -738,7 +738,7 @@ function checkinView() {
           '<output id="o-' + k + '" for="r-' + k + '"' + (set ? '' : ' class="unset"') + '>' + (set ? v : '–') + '</output></div>';
         return k === 'disturb' ? slider + times : times + slider;
       }).join('') + '</div>' +
-      momentsView() +
+      watchView() + momentsView() +
       '<input type="text" data-field="checkNote" value="' + esc(S.checkNote) + '" placeholder="Note (optional)" aria-label="Check-in note" autocomplete="off">' +
       '<button type="button" class="log wide" id="check-save" data-act="checkin"></button></div>';
   }
@@ -754,6 +754,27 @@ function sleepTimesHtml() {
     // v54/v62: on waking, yes/no buttons (bad taste, tinnitus, sore throat), saved in the check-in's note ("Morning: bad taste on waking: yes").
     '<div class="wake-flags" role="group" aria-label="On waking">' + WAKE_FLAGS.map(([k, l]) => '<button type="button" class="moment-btn" data-act="wake-flag" data-v="' + k + '" aria-pressed="' + !!S.wakeFlags[k] + '">' + l + '</button>').join('') + '</div>';
 }
+/* v85 (backlog job 19, first part): a short watch list for the trial period, asked in the check-in instead of
+   remembered. Saved in the check-in's note as "Watch: heel pain on first steps: no; allodynia: yes", so a chat or
+   the audit can count them later. Edit the list here (an editable list in the tracker is job 19(a)). */
+const WATCH = [
+  { key: 'heel', from: '2026-11-13', until: '2026-11-21', once: true, label: 'Heels on first steps out of bed',
+    opts: [['no', 'Fine'], ['yes', 'Sore']], text: (v) => 'heel pain on first steps: ' + v },
+  { key: 'allo', from: '2026-11-13', until: '2026-11-30', label: 'Allodynia (touch that shouldn’t hurt, does)',
+    opts: [['yes', 'Yes, now']], text: () => 'allodynia: yes' },
+];
+function watchActive() {
+  const k = healthKey(new Date());
+  return WATCH.filter((w) => k >= w.from && k <= w.until && !(w.once && LS.get('watch.' + w.key, '') === k));
+}
+function watchView() {
+  const ws = watchActive();
+  if (!ws.length) return '';
+  return '<div class="watch" role="group" aria-label="Keeping an eye on">' + ws.map((w) => '<div class="watch-row"><span>' + esc(w.label) + '</span><div class="watch-btns">' +
+    w.opts.map(([v, l]) => '<button type="button" class="moment-btn" data-act="watch" data-k="' + w.key + '" data-v="' + v + '" aria-pressed="' + (S.watch[w.key] === v) + '">' + esc(l) + '</button>').join('') +
+    '</div></div>').join('') + '<p class="small">Keeping an eye on these during the trial; add where or what in the note.</p></div>';
+}
+const watchPicked = () => WATCH.filter((w) => S.watch[w.key]);
 const WAKE_FLAGS = [['taste', 'Bad taste', 'bad taste on waking: yes'], ['tinnitus', 'Tinnitus', 'tinnitus on waking: yes'], ['throat', 'Sore throat', 'sore throat on waking: yes']];
 /* Typing guard: background refreshes (saving, config, the 60 s tick) wait until you leave the text box,
    so the box doesn't lose focus mid-word. Taps you make still re-render straight away, keeping your place. */
@@ -1385,7 +1406,7 @@ function localInputValue(d) { return dayKey(d) + 'T' + hm(d); }
 function updateCheckButton() {
   const b = $('check-save');
   if (!b) return;
-  const n = Object.keys(S.scores).length + ((S.period || guessPeriod()) === 'Wake' ? Object.values(S.sleepT).filter(Boolean).length + WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).length : 0) + (S.moment.length ? 1 : 0);
+  const n = Object.keys(S.scores).length + ((S.period || guessPeriod()) === 'Wake' ? Object.values(S.sleepT).filter(Boolean).length + WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).length : 0) + (S.moment.length ? 1 : 0) + watchPicked().length;
   b.disabled = !n;
   b.textContent = n ? 'Save check-in · ' + n + (n === 1 ? ' entry' : ' entries') : 'Save check-in';
 }
@@ -1511,6 +1532,7 @@ function logAct(el) {
   if (act === 'moment-pick' || act === 'moment-pick-ci') { S.moment = S.moment.includes(v) ? S.moment.filter((x) => x !== v) : S.moment.concat(v); logRender(); return; }  // v62: several at once
   if (act === 'ring-off') { S.ringOff = !S.ringOff; logRender(); return; }
   if (act === 'wake-flag') { S.wakeFlags[v] = !S.wakeFlags[v]; logRender(); return; }
+  if (act === 'watch') { const k = el.dataset.k; S.watch[k] = S.watch[k] === v ? undefined : v; logRender(); return; }
   if (act === 'moment-log') {
     const picked = S.moment.filter((m) => MOMENTS.includes(m));
     if (!picked.length) return;
@@ -1708,7 +1730,7 @@ function logAct(el) {
     const times = period === 'Wake' ? Object.fromEntries(Object.entries(S.sleepT).filter(([, v]) => /^\d{2}:\d{2}$/.test(v))) : {};
     const n = Object.keys(S.scores).length, t = Object.keys(times).length;
     const mos = S.moment.filter((m) => MOMENTS.includes(m));
-    const fl = period === 'Wake' ? WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).length : 0;  // v62: a flag alone still saves
+    const fl = (period === 'Wake' ? WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).length : 0) + watchPicked().length;  // v62: a flag alone still saves (v85: a watch answer too)
     if (!n && !t && !mos.length && !fl) return;
     const note = S.checkNote.trim(), at = S.time;
     // Each moment is its own entry (kept out of day scores); the note goes with each.
@@ -1720,10 +1742,12 @@ function logAct(el) {
     const sc = Object.assign({}, S.scores);
     if (typeof sc.clarity === 'number') sc.fog = 10 - sc.clarity;
     const flags = period === 'Wake' ? WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).map(([, , t]) => t) : [];
-    const ciNote = (flags.length ? 'Morning: ' + flags.join('; ') + (S.checkNote.trim() ? '. ' : '') : '') + S.checkNote.trim();
-    S.wakeFlags = {};
+    const watched = watchPicked().map((w) => w.text(S.watch[w.key]));
+    const ciNote = [flags.length ? 'Morning: ' + flags.join('; ') : '', watched.length ? 'Watch: ' + watched.join('; ') : '', S.checkNote.trim()].filter(Boolean).join('. ');
+    watchPicked().forEach((w) => { if (w.once) LS.set('watch.' + w.key, healthKey(new Date())); });
+    S.wakeFlags = {}; S.watch = {};
     commit('checkin', { period, stage, scores: sc, note: ciNote, sleep: times },
-      'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : '') + (flags.length ? ' · ' + flags.map((f) => f.replace(' on waking: yes', '')).join(', ') : ''), { wake: period === 'Wake' && stage === 'bed', up: period === 'Wake' && stage === 'up', period });
+      'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : '') + (flags.length ? ' · ' + flags.map((f) => f.replace(' on waking: yes', '')).join(', ') : '') + (watched.length ? ' · ' + watched.join(', ') : ''), { wake: period === 'Wake' && stage === 'bed', up: period === 'Wake' && stage === 'up', period });
     S.scores = {}; S.checkNote = ''; S.moment = []; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
   }
   else if (act === 'trial') {
