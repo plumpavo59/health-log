@@ -738,3 +738,8 @@ html.share-mode .eyebrow{visibility:hidden}
 .sleep-h{font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em}
 .sleep-ring{margin:0;color:var(--text2)}
 .sleep-place{margin:10px 0 4px}
+/* v74: on a laptop (mouse/trackpad) the hidden time box gave no pop-up, so show it as a real time field */
+@media (hover:hover) and (pointer:fine){
+  .time-pick{font-size:0;gap:6px}.time-pick>svg{display:none}
+  .time-pick .time-overlay{position:static;opacity:1;width:auto;height:auto;font:600 15px/1 inherit;font-family:inherit;background:transparent;color:inherit;cursor:text;inset:auto}
+}

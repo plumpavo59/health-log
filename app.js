@@ -842,6 +842,12 @@ function timePill(label) {
     '<input type="datetime-local" class="time-overlay" aria-label="Date and time for the next entry" value="' + localInputValue(base) + '" min="' + localInputValue(new Date(now.getTime() - 3 * 86400000)) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '"></label>' +
     (S.time ? '<button type="button" class="time-reset" data-act="time-now" aria-label="Back to now">Now</button>' : '') + '</span>';
 }
+/* v74: laptops: the calendar button opens the browser's date-and-time picker (the hidden box alone gave nothing). */
+document.addEventListener('click', (ev) => {
+  const t = ev.target;
+  if (!t || !t.matches || !t.matches('.date-pick .time-overlay') || !window.matchMedia('(hover:hover) and (pointer:fine)').matches) return;
+  try { t.showPicker(); } catch (e) { /* older browsers: the box still takes typing */ }
+});
 function timePanel(now) {
   return '<div class="time-panel"><label for="time-input" class="small">Time for the next entry</label>' +
     '<input id="time-input" type="datetime-local" value="' + localInputValue(S.time || now) + '" max="' + localInputValue(new Date(now.getTime() + 10 * 60000)) + '">' +
