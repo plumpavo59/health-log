@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v85 · 13 Nov';
+const APP_VERSION = 'v86 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -439,6 +439,29 @@ function trialView() {
 /* ---------- Medication plan (Meds → PLAN, via HealthLog v13) ---------- */
 const planSteps = () => (cfg.plan && Array.isArray(cfg.plan.steps) ? cfg.plan.steps : []);
 const dayNum = (a, b) => Math.round((keyToDate(b) - keyToDate(a)) / 86400000) + 1;
+/* v86: planned breaks vs doses not logged. A PLAN step plans a medicine off when its name and a word like off / stop
+   / break / pause / taper sit in the same part of the step (label, or a clause of CHANGE split at ; or .), so
+   "Stop probiotic and antihistamine; Elvanse … continue" plans only the probiotic off. A routine medicine
+   (Per day above 0) with nothing logged on a past day outside a planned break, since its first logged dose, is
+   "not logged" (the tracker's rule: a missing dose is unknown, not proven missed). */
+const PLAN_OFF = /\b(off|stop|stopped|stopping|break|pause|paused|taper)\b/i, PLAN_KEEP = /\b(continue|continues|steady|keep)\b/i;
+const MED_OFF_CACHE = {};
+function medPlanOff(name) {
+  const steps = planSteps(), key = name + '|' + steps.length + '|' + (steps[0] ? steps[0].from : '');
+  if (MED_OFF_CACHE[key]) return MED_OFF_CACHE[key];
+  const re = new RegExp('\\b' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+  const out = steps.filter((st) => st.from && [st.label || ''].concat(String(st.change || '').split(/[;.]/)).some((part) => re.test(part) && PLAN_OFF.test(part) && !PLAN_KEEP.test(part)))
+    .map((st) => ({ from: st.from, to: st.to || '9999-12-31', label: String(st.label || '').replace(/^\d+\s*·\s*/, '') }));
+  return (MED_OFF_CACHE[key] = out);
+}
+function medDayState(name, d, k, today) {
+  if ((d.byDay[k] || 0) > 0) return '';
+  const off = medPlanOff(name).find((x) => k >= x.from && k <= x.to);
+  if (off) return { cls: 'planned', tip: 'planned break (' + off.label + ')' };
+  if (!(d.perDay > 0) || k >= today) return '';
+  if (d.first === undefined) d.first = Object.keys(d.byDay).filter((x) => d.byDay[x] > 0).sort()[0] || '';
+  return d.first && k > d.first ? { cls: 'nolog', tip: 'not logged' } : '';
+}
 function stepState(st, today) {
   if (st.to && st.to < today) return 'done';
   if (st.from <= today && (!st.to || st.to >= today)) return 'now';
@@ -639,11 +662,13 @@ function historyView(mode) {
     const open = health ? TR.medOpen === name : S.calMed === name;
     html += '<button type="button" class="hist-row' + (health && open ? ' open' : '') + '" ' + (health ? 'data-tr="medrow"' : 'data-act="cal"') + ' data-v="' + esc(name) + '" aria-expanded="' + open + '" aria-label="' + esc(name) + ': logged on ' + taken + ' of the last 14 days. Show calendar">' +
       '<span class="hist-name">' + esc(name) + '</span><span class="hist-cells">' +
-      keys.map((k) => '<span class="' + cls(d.byDay[k] || 0, d.perDay, k) + '"></span>').join('') + '</span>' +
+      keys.map((k) => { const st = medDayState(name, d, k, today); return '<span class="' + cls(d.byDay[k] || 0, d.perDay, k) + (st ? ' ' + st.cls : '') + '"' + (st ? ' title="' + esc(shortDate(k) + ': ' + st.tip) + '"' : '') + '></span>'; }).join('') + '</span>' +
       '<span class="hist-n">' + taken + '/14</span></button>';
     if (!health && S.calMed === name) html += calendarView(name, d, today, cls);
   });
-  return html + '</div>';
+  const keyNote = Object.keys(data).some((name) => keys.some((k) => medDayState(name, data[name], k, today)))
+    ? '<div class="hist-key small"><span><i class="hk on"></i>Logged</span><span><i class="hk planned"></i>Planned break</span><span><i class="hk nolog"></i>Not logged (routine dose)</span></div>' : '';
+  return html + keyNote + '</div>';
 }
 
 function calendarView(name, d, today, cls) {
@@ -659,7 +684,8 @@ function calendarView(name, d, today, cls) {
     const date = keyToDate(k);
     const label = date.getDate() === 1 ? '<small style="font-size:11px">1 ' + date.toLocaleDateString('en-GB', { month: 'short' }) + '</small>' : date.getDate();
     const amount = d.mg && n ? (d.mg[k] ? d.mg[k] + (d.unknown[k] ? '+' : '') : '?') : '';
-    cells += '<span class="d ' + cls(n, d.perDay, k) + (d.mg ? ' dosed' : '') + '" title="' + esc(k) + (n ? ': ' + (d.supps ? suppWord(n) + (d.names[k] ? ': ' + d.names[k].join(', ') : '') : n) + (amount ? ' · ' + amount + ' mg' : '') : '') + '">' +
+    const stt = medDayState(name, d, k, today);
+    cells += '<span class="d ' + cls(n, d.perDay, k) + (stt ? ' ' + stt.cls : '') + (d.mg ? ' dosed' : '') + '" title="' + esc(k) + (stt ? ': ' + stt.tip : '') + (n ? ': ' + (d.supps ? suppWord(n) + (d.names[k] ? ': ' + d.names[k].join(', ') : '') : n) + (amount ? ' · ' + amount + ' mg' : '') : '') + '">' +
       (d.mg ? '<span>' + label + '</span><i>' + amount + '</i>' : label) + '</span>';
   }
   const count = (days) => Array.from({ length: days }, (_, i) => addDays(today, -i)).filter((k) => (d.byDay[k] || 0) > 0).length;
@@ -3882,10 +3908,12 @@ function medsView(today) {
   html += '<div class="tr-medsel"><b>' + esc(cur) + '</b></div>';
   html += calGrid('med-' + cur, cur + ' calendar', firstKey, today, (k) => {
     const n = d.byDay[k] || 0, day = keyToDate(k).getDate();
+    const stt = medDayState(cur, d, k, today);
     const cls = ['tr-cell', n ? (d.perDay > 0 && n < d.perDay ? 'mpart' : 'mon') : 'moff'];
+    if (stt) cls.push(stt.cls === 'planned' ? 'mplan' : 'mnolog');
     if (k === today) cls.push('today');
     const amount = d.mg && n ? (d.mg[k] ? d.mg[k] + (d.unknown[k] ? '+' : '') : '?') : '';
-    return '<span class="' + cls.join(' ') + '" data-tip="' + esc(longDate(k) + ' · ' + (n ? (d.supps ? suppWord(n) + (d.names[k] ? ': ' + d.names[k].join(', ') : '') : n + (n === 1 ? ' dose' : ' doses')) + (amount ? ' · ' + amount + ' mg' : '') : 'none logged')) + '">' + day + (amount ? '<i class="tr-mg">' + amount + '</i>' : '') + '</span>';
+    return '<span class="' + cls.join(' ') + '" data-tip="' + esc(longDate(k) + ' · ' + (n ? (d.supps ? suppWord(n) + (d.names[k] ? ': ' + d.names[k].join(', ') : '') : n + (n === 1 ? ' dose' : ' doses')) + (amount ? ' · ' + amount + ' mg' : '') : stt ? stt.tip : 'none logged')) + '">' + day + (amount ? '<i class="tr-mg">' + amount + '</i>' : '') + '</span>';
   });
   // How long: the current run (gaps of up to 3 days allowed), the last 14 days, and the first day in the data.
   const stats = [];
@@ -3902,7 +3930,7 @@ function medsView(today) {
   html += stats.length ? '<div class="pt-stats tr-medstats">' + stats.map((x) => '<div class="pt-cell"><span>' + esc(x.label) + '</span><b>' + esc(x.value) + '</b><small>' + esc(x.sub) + '</small></div>').join('') + '</div>'
     : '<p class="small">No ' + esc(cur) + ' logged in the last four months.</p>';
   if (taken.length >= 3) html += patBtn('medfx:' + cur, 'What ' + (d.supps ? 'supplements seem' : cur + ' seems') + ' to do');
-  return html + '<p class="small tr-hint">Dark = logged' + (d.supps ? ', half = some of the ones due' : d.perDay > 1 ? ', half = some of ' + d.perDay + ' doses' : '') + (d.mg ? ', small number = mg' : '') + '. Counts logged doses only; before 4am counts as the night before.</p>';
+  return html + '<p class="small tr-hint">Dark = logged' + (medPlanOff(cur).length ? ', striped = planned break' : '') + (d.perDay > 0 ? ', red outline = routine dose not logged' : '') + (d.supps ? ', half = some of the ones due' : d.perDay > 1 ? ', half = some of ' + d.perDay + ' doses' : '') + (d.mg ? ', small number = mg' : '') + '. Counts logged doses only; before 4am counts as the night before.</p>';
 }
 /* v69: "What it seems to do" for each medicine (Meds tab › a medicine › button). Compares days it was taken with days
    it wasn't, inside the time you were using it (from the first dose to 3 days after the last), on every measure

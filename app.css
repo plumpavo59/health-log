@@ -790,3 +790,10 @@ html.share-mode .eyebrow{visibility:hidden}
 .watch-row>span{font-size:14px;font-weight:600}
 .watch-btns{display:flex;gap:6px}
 .watch .small{margin:0}
+/* v86 medication days: planned break (striped) vs routine dose not logged (red outline) */
+.hist-cells span.planned,.cal-grid .d.planned,.tr-cell.mplan,.hk.planned{background:repeating-linear-gradient(135deg,var(--line2) 0 2px,transparent 2px 5px);border-color:var(--line2)}
+.hist-cells span.nolog,.cal-grid .d.nolog,.tr-cell.mnolog,.hk.nolog{border:1.5px solid var(--bad);background:transparent}
+.hist-key{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0 2px;color:var(--text2)}
+.hist-key span{display:inline-flex;align-items:center;gap:5px}
+.hk{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--track)}
+.hk.on{background:var(--ink);border-color:var(--ink)}
