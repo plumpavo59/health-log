@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v77 · 13 Nov';
+const APP_VERSION = 'v78 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -1933,19 +1933,21 @@ async function loadCarryOver() {
   } catch (e) {}
 }
 
-/* v76: Today's 3 = tasks with Todoist's red flag (P1; priority 4 in Todoist's data), at most 3, only on days
-   something really has to be done today; then the rest ("Then"); optional ones fold under "If there's time".
-   Priorities come with getCarryOver (Optional-tasks v76); without them the list is one block as before. */
-const isTop = (t) => Number(t.priority || (T.prio && T.prio[t.id]) || 1) === 4;
+/* v76/v78: "Priority" = tasks with Todoist's red flag (P1; priority 4 in Todoist's data), however many; then the
+   rest ("Then"), P2 above P3 above unflagged; optional ones fold under "If there's time". Priorities come with
+   getCarryOver (Optional-tasks v76); without them the list is one block in the plan's order, as before. */
+const taskPrio = (t) => Number(t.priority || (T.prio && T.prio[t.id]) || 1);
+const isTop = (t) => taskPrio(t) === 4;
 function renderTasks() {
   $('focus').replaceChildren(); $('extra').replaceChildren();
   const all = T.tasks.concat(carriedTasks());
   let core = all.filter((t) => !t.optional);
   const extra = all.filter((t) => t.optional);
-  const top = T.manual ? [] : core.filter(isTop).slice(0, 3);
+  const top = T.manual ? [] : core.filter(isTop);
+  if (!T.manual) core = core.map((t, i) => [t, i]).sort((a, b) => taskPrio(b[0]) - taskPrio(a[0]) || a[1] - b[1]).map((x) => x[0]);
   if (top.length) {
     const head = (txt) => { const h = document.createElement('h2'); h.className = 'task-tier'; h.textContent = txt; return h; };
-    $('focus').appendChild(head('Today’s 3'));
+    $('focus').appendChild(head('Priority'));
     top.forEach((t) => $('focus').appendChild(taskRow(t)));
     core = core.filter((t) => top.indexOf(t) < 0);
     if (core.length) $('focus').appendChild(head('Then'));
