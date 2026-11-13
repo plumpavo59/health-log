@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v80 · 13 Nov';
+const APP_VERSION = 'v81 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -822,7 +822,15 @@ document.addEventListener('change', (ev) => {
     const age = Date.now() - file.lastModified;
     if (age > 10 * 60000 && age < 3 * 86400000) { S.time = new Date(file.lastModified); toast('Time set from the photo: ' + pad(S.time.getHours()) + ':' + pad(S.time.getMinutes())); }
   }
-  S.photoBusy = true; logRender();
+  S.photoBusy = true; S.barcode = null; logRender();
+  // v81: a product barcode in the photo → look the product up; the photo itself isn't kept.
+  findBarcode(file).then((code) => {
+    if (!S.sheet) { S.photoBusy = false; return; }
+    if (code) { S.photoBusy = false; S.foodPhoto = null; barcodeLookup(code); return; }
+    mealPhoto(file);
+  });
+});
+function mealPhoto(file) {
   const img = new Image(), url = URL.createObjectURL(file);
   img.onload = () => {
     const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
@@ -834,7 +842,85 @@ document.addEventListener('change', (ev) => {
   };
   img.onerror = () => { URL.revokeObjectURL(url); S.photoBusy = false; toast('Couldn’t read that photo.'); logRender(); };
   img.src = url;
-});
+}
+/* v81: barcodes. The reader (html5-qrcode, Apache-2.0, in vendor/) loads only when a photo is chosen; it reads
+   EAN/UPC product codes on the phone. The product comes from Open Food Facts (free, open database). */
+let BC_LIB = null;
+const BC_SRC = new URL('vendor/html5-qrcode.min.js', (document.currentScript && document.currentScript.src) || location.href).href;  // works from /today/ too
+function loadBarcodeLib() {
+  if (!BC_LIB) BC_LIB = new Promise((res, rej) => {
+    const sc = document.createElement('script'); sc.src = BC_SRC;
+    sc.onload = () => (window.__Html5QrcodeLibrary__ ? res(window.__Html5QrcodeLibrary__) : rej(new Error('no lib')));
+    sc.onerror = () => { BC_LIB = null; rej(new Error('load')); };
+    document.head.appendChild(sc);
+  });
+  return BC_LIB;
+}
+/* Scan the photo at full size (a smaller copy loses thin bars); only very large photos (over 4000 px, e.g. 48 MP)
+   are scaled down, to stay inside the phone's canvas limit. */
+function bcShrink(file) {
+  return new Promise((res) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 4000 / Math.max(img.naturalWidth, img.naturalHeight));
+      if (k === 1) { URL.revokeObjectURL(url); res(file); return; }
+      const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      c.toBlob((b) => res(b ? new File([b], 'scan.jpg', { type: 'image/jpeg' }) : file), 'image/jpeg', 0.92);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); res(file); };
+    img.src = url;
+  });
+}
+async function findBarcode(file) {
+  try {
+    const lib = await loadBarcodeLib(), F = lib.Html5QrcodeSupportedFormats;
+    let el = document.getElementById('bc-reader');
+    if (!el) { el = document.createElement('div'); el.id = 'bc-reader'; el.setAttribute('aria-hidden', 'true'); el.style.cssText = 'position:fixed;left:-10000px;top:0;width:1200px;height:1px;overflow:hidden'; document.body.appendChild(el); }
+    const r = new lib.Html5Qrcode('bc-reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E], verbose: false,
+      useBarCodeDetectorIfSupported: true, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    const text = await r.scanFile(await bcShrink(file), false);
+    try { r.clear(); } catch (e) { /* nothing to clear */ }
+    return /^\d{8,14}$/.test(String(text)) ? String(text) : null;
+  } catch (e) { return null; }  // no barcode (or the reader couldn't load): carry on as a meal photo
+}
+async function barcodeLookup(code) {
+  S.barcode = { code, status: 'looking' }; logRender();
+  let res = null;
+  try {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 9000);
+    const r = await fetch('https://world.openfoodfacts.org/api/v2/product/' + code + '.json?fields=product_name,product_name_en,brands,quantity,ingredients_text_en,ingredients_text', { signal: ctl.signal });
+    clearTimeout(timer);
+    const j = await r.json().catch(() => null);
+    const p = j && j.status === 1 && j.product;
+    if (p && (p.product_name_en || p.product_name)) {
+      const brand = String(p.brands || '').split(',')[0].trim();
+      res = { code, status: 'found', name: String(p.product_name_en || p.product_name).trim(), brand, qty: String(p.quantity || '').trim(),
+        ingredients: String(p.ingredients_text_en || p.ingredients_text || '').replace(/\s+/g, ' ').replace(/_/g, '').trim() };
+    } else res = { code, status: r.ok || r.status === 404 ? 'missing' : 'error' };
+  } catch (e) { res = { code, status: 'error' }; }
+  if (!S.barcode || S.barcode.code !== code) return;  // cleared or replaced meanwhile
+  S.barcode = res;
+  if (res.status === 'found' && !S.food.trim()) S.food = res.name + (res.brand && res.name.toLowerCase().indexOf(res.brand.toLowerCase()) < 0 ? ' (' + res.brand + ')' : '');
+  logRender();
+  if (res.status !== 'found') { const f = $('food-input'); if (f) f.focus(); }
+}
+function barcodeView() {
+  const b = S.barcode;
+  if (!b) return '';
+  const x = '<button type="button" class="icon-btn bc-x" data-act="barcode-clear" aria-label="Remove barcode">' + X_SVG + '</button>';
+  if (b.status === 'looking') return '<div class="bc-card"><span>Barcode ' + esc(b.code) + ' · looking it up…</span>' + x + '</div>';
+  if (b.status === 'found') return '<div class="bc-card found"><div><b>' + esc(b.name) + '</b>' + (b.brand || b.qty ? '<small>' + esc([b.brand, b.qty].filter(Boolean).join(' · ')) + '</small>' : '') +
+    (b.ingredients ? '<small class="bc-ing">' + esc(b.ingredients) + '</small>' : '<small>No ingredients listed</small>') + '</div>' + x + '</div>';
+  return '<div class="bc-card"><span>' + (b.status === 'missing' ? 'Barcode ' + esc(b.code) + ' isn’t in Open Food Facts. Type what it is; the barcode is kept.' : 'Couldn’t look up barcode ' + esc(b.code) + ' (no connection?). Type what it is; the barcode is kept.') + '</span>' + x + '</div>';
+}
+function barcodeNote(b) {
+  if (!b) return '';
+  const head = 'Barcode ' + b.code + (b.status === 'found' ? ' · Open Food Facts' + (b.brand ? ': ' + b.brand : '') + (b.qty ? ', ' + b.qty : '') : b.status === 'missing' ? ' · not in Open Food Facts' : '');
+  if (b.status !== 'found' || !b.ingredients) return head;
+  const room = 490 - head.length - 16;
+  return head + ' · Ingredients: ' + (b.ingredients.length > room ? b.ingredients.slice(0, room - 1) + '…' : b.ingredients);
+}
 const CAL_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>';
 const CLOCK_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
 /* One tap opens the phone's date/time picker straight away (an invisible input sits over the pill). */
@@ -1044,11 +1130,11 @@ function sheetView() {
   } else if (S.sheet === 'food') {
     btn = '<button type="button" class="log" id="food-log" data-act="food"' + (S.food.trim() || S.foodPhoto ? '' : ' disabled') + '>Log</button>';
     // v56: a camera button; the photo goes to Drive › Meal photo logs and the meal is marked to be interpreted later.
-    body = (S.foodPhoto ? '<div class="photo-prev"><img src="' + S.foodPhoto + '" alt="Meal photo"><button type="button" class="icon-btn photo-x" data-act="photo-clear" aria-label="Remove photo">' + X_SVG + '</button></div>' : '') +
+    body = barcodeView() + (S.foodPhoto ? '<div class="photo-prev"><img src="' + S.foodPhoto + '" alt="Meal photo"><button type="button" class="icon-btn photo-x" data-act="photo-clear" aria-label="Remove photo">' + X_SVG + '</button></div>' : '') +
       '<div class="food-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="' + (S.foodPhoto ? 'Add a description (optional)' : 'What did you eat?') + '" aria-label="What did you eat" autocomplete="off" enterkeyhint="send">' +
       // v80: one photo button; without "capture" the phone offers Take Photo or Photo Library (v72's library input).
       '<label class="seg cam-btn" aria-label="Add a photo of the meal">' + CAM_SVG + '<input type="file" id="food-photo-lib" accept="image/*"></label></div>' +
-      (S.photoBusy ? '<p class="small">Preparing the photo…</p>' : '') +
+      (S.photoBusy ? '<p class="small">Checking the photo for a barcode…</p>' : '') +
       '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div>';
   } else if (S.sheet === 'activity') {
     btn = '<button type="button" class="log" id="act-log" data-act="activity"' + (actRoute() ? '' : ' disabled') + '>' + (actRoute() === 'inbox' ? 'Send to inbox' : 'Log') + '</button>';
@@ -1094,7 +1180,7 @@ function closeSheet() {
   if (!S.sheet) return;
   S.sheet = null;
   // v39: closing a window drops whatever was selected in it (typed text is kept).
-  S.foodPhoto = null; S.meds = []; S.doses = {}; S.suppOn = false; S.supps = []; S.bristol = null; S.size = null; S.urgent = false; S.bpain = '';
+  S.foodPhoto = null; S.barcode = null; S.meds = []; S.doses = {}; S.suppOn = false; S.supps = []; S.bristol = null; S.size = null; S.urgent = false; S.bpain = '';
   S.actType = null; S.actMin = null; S.actEffort = null; S.actMinText = ''; S.moment = [];
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   logRender();
@@ -1518,13 +1604,15 @@ function logAct(el) {
     S.meds = []; S.doses = {}; closeSheet();
   }
   else if (act === 'food') {
-    const food = S.food.trim(), photo = S.foodPhoto;
-    if (!food && !photo) return;
+    const food = S.food.trim(), photo = S.foodPhoto, b = S.barcode;
+    if (!food && !photo) { if (b && b.status !== 'looking') { const f = $('food-input'); if (f) f.focus(); } return; }
     if (photo) commit('food', { food, photo }, 'Meal photo' + (food ? ' · ' + food : ''));
+    else if (b && b.status !== 'looking') commit('food', { food, note: barcodeNote(b) }, food);  // v81: barcode and ingredients go in Notes
     else commit('food', { food }, food);
-    S.food = ''; S.foodPhoto = null; closeSheet();
+    S.food = ''; S.foodPhoto = null; S.barcode = null; closeSheet();
   }
   else if (act === 'photo-clear') { S.foodPhoto = null; logRender(); }
+  else if (act === 'barcode-clear') { if (S.barcode && S.barcode.status === 'found' && S.food === S.barcode.name + (S.barcode.brand ? ' (' + S.barcode.brand + ')' : '')) S.food = ''; S.barcode = null; logRender(); }
   else if (act === 'checkin') {
     const period = S.period || guessPeriod();
     const stage = period === 'Wake' ? (S.stage || guessStage()) : '';

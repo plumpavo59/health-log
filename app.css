@@ -753,3 +753,11 @@ html.share-mode .eyebrow{visibility:hidden}
 .sleep-pill b{font-weight:600;color:var(--ink,inherit)}
 .sleep-pill.done{border-style:solid;color:var(--text2)}
 .sleep-hrs{font-size:13px;color:var(--text2);margin-left:auto;white-space:nowrap}
+/* v81 barcode result in the food window */
+.bc-card{display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;font-size:14px;color:var(--text2)}
+.bc-card>span,.bc-card>div{flex:1;min-width:0}
+.bc-card.found b{display:block;font-size:15px;color:inherit}
+.bc-card small{display:block;margin-top:2px;color:var(--text2)}
+.bc-card .bc-ing{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px}
+.bc-card .bc-x{flex:0 0 auto;width:32px;height:32px;margin:-4px -6px 0 0}
+.bc-card .bc-x svg{width:16px;height:16px}
