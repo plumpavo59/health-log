@@ -746,3 +746,10 @@ html.share-mode .eyebrow{visibility:hidden}
 /* v76 Today's 3 / Then */
 .tv .task-tier{font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;margin:18px 0 6px}
 .tv .task-tier:first-child{margin-top:4px}
+/* v77 sleep: one slim row under the quick buttons */
+.sleep-strip{display:flex;align-items:center;gap:8px;margin:10px 0 2px;flex-wrap:nowrap;overflow:hidden}
+.sleep-strip .sleep-h{font-size:12px;flex:0 0 auto}
+.sleep-pill{flex:0 1 auto;min-height:36px;padding:0 12px;border-radius:18px;border:1px dashed var(--line2,var(--line));background:transparent;font-size:14px;color:var(--text2);white-space:nowrap}
+.sleep-pill b{font-weight:600;color:var(--ink,inherit)}
+.sleep-pill.done{border-style:solid;color:var(--text2)}
+.sleep-hrs{font-size:13px;color:var(--text2);margin-left:auto;white-space:nowrap}

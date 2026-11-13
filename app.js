@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v76 · 13 Nov';
+const APP_VERSION = 'v77 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -581,6 +581,9 @@ function stepsCompare(T2, today) {
   return p;
 }
 
+/* v77: an entry from this phone still counts locally until a sheet read that started after it was saved, so
+   counts don't drop back for the few seconds between "saved" and the next config arriving. */
+const notYetInSheet = (r) => r.status !== 'failed' && (r.status !== 'saved' || !r.savedAt || !cfg.at || cfg.at <= r.savedAt);
 /* Medication history: health days (before 04:00 counts as the previous day). */
 function medCounts() {
   const h = cfg.history;
@@ -592,12 +595,12 @@ function medCounts() {
     if (Array.isArray(m.names)) m.names.forEach((l, i) => { if (l && l.length) names[addDays(h.startKey, i)] = l.slice(); });
     if (mg) m.mg.forEach((n, i) => { const k = addDays(h.startKey, i); if (n) mg[k] = n; if ((m.mgUnknown || [])[i]) unknown[k] = true; });
     recent.forEach((r) => {
-      if (r.kind === 'meds' && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)) {
+      if (r.kind === 'meds' && notYetInSheet(r) && (r.meds || []).includes(m.name)) {
         const k = r.hday || r.day; byDay[k] = (byDay[k] || 0) + 1;
         if (mg) { const n = doseMg((r.doses || {})[m.name]); if (n === null) unknown[k] = true; else mg[k] = (mg[k] || 0) + n; }
       }
       // v29: supplements not yet in the server's history (2 = all due, 1 = some).
-      if (m.supps && r.kind === 'supps' && r.status !== 'saved' && r.status !== 'failed' && (r.supps || []).length) {
+      if (m.supps && r.kind === 'supps' && notYetInSheet(r) && (r.supps || []).length) {
         const k = r.hday || r.day, due = Number(r.due) || 1;
         byDay[k] = Math.max(byDay[k] || 0, r.supps.length >= due ? 2 : 1);
         names[k] = (names[k] || []).concat(r.supps.filter((x) => !(names[k] || []).includes(x)));
@@ -693,17 +696,21 @@ function sleepSlotDate(slot, hhmm) {
 }
 const uprightToday = () => !!(cfg.today && cfg.today.upright) ||
   recent.some((r) => r.hday === healthKey(new Date()) && r.kind === 'checkin' && r.status !== 'failed' && r.period && !/^(Wake|Bed)$/.test(r.period));
+/* v77: one slim row under the quick buttons, only when it's useful: in the morning (04:00–15:00) until last
+   night's into-bed and this morning's out-of-bed are both logged, and in the evening (21:00–04:00) until tonight's
+   into-bed is logged. Logged times can still be changed from Logged today. */
 function sleepCardView() {
-  const m = sleepMarks(), n = m.night || {};
-  const btn = (k, label, ring) => '<button type="button" class="seg sleep-mark' + (m[k] ? ' done' : '') + '" data-act="sleep-open" data-v="' + k + '">' + label +
-    '<small>' + (m[k] ? esc(m[k].hm) + (m[k].place && !/^home$/i.test(m[k].place) ? ' · ' + esc(m[k].place) : '') + (m[k].row ? ' · change' : '')
-      : ring ? 'ring ' + esc(ring) + ' · tap to log' : 'tap to log') + '</small></button>';
-  const ringLine = n.bt || n.wk
-    ? 'Ring: asleep ' + esc(n.bt || '?') + ' · woke ' + esc(n.wk || '?') + (n.last ? ' (in bed til ' + esc(n.last) + ')' : '') + (typeof n.sl === 'number' ? ' · ' + n.sl + ' h' : '')
-    : 'Ring sleep not in yet';
-  return '<section class="card sleep-card" aria-label="Sleep times">' +
-    '<div class="sleep-row"><span class="sleep-h">Last night</span>' + btn('lastbed', 'Into bed', n.ib) + '<p class="small sleep-ring">' + ringLine + '</p></div>' +
-    '<div class="sleep-row"><span class="sleep-h">Today</span><div class="grid2">' + btn('up', 'Out of bed', n.up) + btn('bed', 'Into bed tonight') + '</div></div></section>';
+  const m = sleepMarks(), n = m.night || {}, h = new Date().getHours();
+  const pill = (k, label) => '<button type="button" class="sleep-pill' + (m[k] ? ' done' : '') + '" data-act="sleep-open" data-v="' + k + '">' +
+    esc(label) + ' <b>' + (m[k] ? esc(m[k].hm) : 'log') + '</b></button>';
+  let body = '';
+  if (h >= 4 && h < 15 && (!m.lastbed || !m.up)) {
+    body = '<span class="sleep-h">Last night</span>' + pill('lastbed', 'Bed') + pill('up', 'Up') +
+      (typeof n.sl === 'number' ? '<span class="sleep-hrs">' + n.sl + ' h</span>' : '');
+  } else if ((h >= 21 || h < 4) && !m.bed) {
+    body = '<span class="sleep-h">Tonight</span>' + pill('bed', 'Into bed');
+  }
+  return body ? '<div class="sleep-strip" role="group" aria-label="Sleep times">' + body + '</div>' : '';
 }
 function checkinView() {
   const period = S.period || guessPeriod();
@@ -785,7 +792,7 @@ function logRender() {
     head('') +
     // The time pill floats at the top while you scroll; the panel opens here, or inside a sheet when one is open.
     '<div class="time-bar">' + timePill(timeLabel) + '</div>' + (S.timeOpen && !S.sheet ? timePanel(now) : '') +
-    trialView() + logInboxView() + checkinView() + sleepCardView() + quickView() +
+    trialView() + logInboxView() + checkinView() + quickView() + sleepCardView() +
     (waiting ? '<div class="queue-note"><span>' + waiting + ' waiting to send</span><button type="button" class="link-btn" data-act="flush">Send now</button></div>' : '') +
     // v49: Logged today is folded by default; just-logged entries (with Undo) and problems still show.
     (rows.length || failed.length ? '<section class="recent" aria-label="Logged today"><button type="button" class="recent-toggle" data-act="logged-toggle" aria-expanded="' + !!S.loggedOpen + '"><h2>LOGGED TODAY <span class="rc-n">' + rows.length + '</span></h2><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>' + missingRows().map((m) =>
@@ -961,7 +968,7 @@ const X_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
 function medTakenToday(m) {
   const hk = healthKey(new Date());
   return (((cfg.today || {}).meds || {})[m.name] || 0) +
-    recent.filter((r) => r.kind === 'meds' && r.hday === hk && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)).length;
+    recent.filter((r) => r.kind === 'meds' && r.hday === hk && notYetInSheet(r) && (r.meds || []).includes(m.name)).length;
 }
 function quickCount(kind) {
   if (kind === 'meds') {
@@ -997,7 +1004,7 @@ function sheetView() {
     // v39: what's still to take today comes first, then what's done, then the as-needed ones.
     const chip = (m) => '<button type="button" class="chip med" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><small class="dose-top">' + esc(chipDoseTop(m)) + '</small><span class="med-name"><b>' + esc(m.name) + '</b>' + takenMark(m) + '</span></button>';
     const all = cfg.meds || [], hk = healthKey(new Date());
-    const nToday = (m) => (((cfg.today || {}).meds || {})[m.name] || 0) + recent.filter((r) => r.kind === 'meds' && r.hday === hk && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)).length;
+    const nToday = (m) => (((cfg.today || {}).meds || {})[m.name] || 0) + recent.filter((r) => r.kind === 'meds' && r.hday === hk && notYetInSheet(r) && (r.meds || []).includes(m.name)).length;
     const routine = all.filter((m) => Number(m.perDay) !== 0), asNeededMeds = all.filter((m) => Number(m.perDay) === 0);
     const due = routine.filter((m) => nToday(m) < (m.perDay || 1)), done = routine.filter((m) => nToday(m) >= (m.perDay || 1));
     const suppDone = suppDoneToday();
@@ -1130,7 +1137,7 @@ function flareToday() {
 function takenMark(m) {
   const hk = healthKey(new Date());
   let n = ((cfg.today || {}).meds || {})[m.name] || 0;
-  n += recent.filter((r) => r.kind === 'meds' && r.hday === hk && r.status !== 'saved' && r.status !== 'failed' && (r.meds || []).includes(m.name)).length;
+  n += recent.filter((r) => r.kind === 'meds' && r.hday === hk && notYetInSheet(r) && (r.meds || []).includes(m.name)).length;
   if (!n) return '';
   const per = m.perDay || 1;
   const asNeeded = isDosed(m);
@@ -1309,13 +1316,14 @@ async function logFlush() {
 
 async function logRefreshConfig() {
   if (!Conn.canLog()) return;
+  const asked = Date.now();  // v77: cfg.at = when the sheet was asked, so only entries saved before that count as in it
   try {
     const res = await api(SHARE_ID ? { action: 'config', visit: !SHR.visitSent } : { action: 'config' });
     if (SHARE_ID && res && res.success) { SHR.visitSent = true; SHR.loadError = ''; }
     if (SHARE_ID && res && !res.success && res.auth !== false) SHR.loadError = res.error || 'No answer.';
     if (res && res.success) {
       cfg = { meds: res.meds || FALLBACK.meds, foods: res.foods || [], trial: res.trial || null, history: res.history || null, symptoms: res.symptoms || null, recentMeds: res.recentMeds,
-        supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: Date.now(), plan: res.plan || null, suppPlan: res.suppPlan || null, episodes: res.episodes || [], share: res.share || null, clarity: !!res.clarity, today: res.today || FALLBACK.today };
+        supps: res.supps || [], todayLog: res.todayLog, todayHday: healthKey(new Date()), at: asked, plan: res.plan || null, suppPlan: res.suppPlan || null, episodes: res.episodes || [], share: res.share || null, clarity: !!res.clarity, today: res.today || FALLBACK.today };
       if ($('medications') && !$('medications').hidden) renderRecentMeds();
       if (S.sheet && document.activeElement && /INPUT/.test(document.activeElement.tagName) && document.activeElement.closest('#sheet')) {
         LS.set('config', { data: cfg, day: dayKey(new Date()) });   // don't rebuild a sheet while typing in it
@@ -3897,7 +3905,9 @@ window.addEventListener('online', () => { logFlush(); inboxFlush(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   logFlush();
-  if (view === 'log') { logRenderSoft(); logRefreshConfig(); }
+  if (view === 'log') logRenderSoft();
+  // v77: coming back to the app refreshes the health data whichever tab is showing (at most once a minute).
+  if (Conn.canLog() && (tabOn('log') || tabOn('trends')) && Date.now() - (cfg.at || 0) > 60000) logRefreshConfig();
   inboxFlush();
   // (hidden tabs are never the current view, so nothing below loads for them)
   if ((view === 'ahead' || view === 'money') && Conn.paired()) showView(view);
