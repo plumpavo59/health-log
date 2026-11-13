@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v81 · 13 Nov';
+const APP_VERSION = 'v82 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -811,6 +811,7 @@ function logRender() {
   }
 }
 const IMG_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/></svg>';
+const BARCODE_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M17 8v8" stroke-width="1.6"/><path d="M15 8v8" stroke-width="1"/></svg>';
 const CAM_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
 /* v56: shrink a meal photo to at most 1600 px (JPEG) so it sends quickly. */
 document.addEventListener('change', (ev) => {
@@ -822,13 +823,9 @@ document.addEventListener('change', (ev) => {
     const age = Date.now() - file.lastModified;
     if (age > 10 * 60000 && age < 3 * 86400000) { S.time = new Date(file.lastModified); toast('Time set from the photo: ' + pad(S.time.getHours()) + ':' + pad(S.time.getMinutes())); }
   }
-  S.photoBusy = true; S.barcode = null; logRender();
-  // v81: a product barcode in the photo → look the product up; the photo itself isn't kept.
-  findBarcode(file).then((code) => {
-    if (!S.sheet) { S.photoBusy = false; return; }
-    if (code) { S.photoBusy = false; S.foodPhoto = null; barcodeLookup(code); return; }
-    mealPhoto(file);
-  });
+  // v82: the photo button is for meal photos only; barcodes have their own live scanner (barcode button).
+  S.photoBusy = true; logRender();
+  mealPhoto(file);
 });
 function mealPhoto(file) {
   const img = new Image(), url = URL.createObjectURL(file);
@@ -843,8 +840,8 @@ function mealPhoto(file) {
   img.onerror = () => { URL.revokeObjectURL(url); S.photoBusy = false; toast('Couldn’t read that photo.'); logRender(); };
   img.src = url;
 }
-/* v81: barcodes. The reader (html5-qrcode, Apache-2.0, in vendor/) loads only when a photo is chosen; it reads
-   EAN/UPC product codes on the phone. The product comes from Open Food Facts (free, open database). */
+/* v81/v82: barcodes. The reader (html5-qrcode, Apache-2.0, in vendor/) loads only when the barcode button is
+   first used; it reads EAN/UPC product codes on the phone. The product comes from Open Food Facts (free, open database). */
 let BC_LIB = null;
 const BC_SRC = new URL('vendor/html5-qrcode.min.js', (document.currentScript && document.currentScript.src) || location.href).href;  // works from /today/ too
 function loadBarcodeLib() {
@@ -856,34 +853,70 @@ function loadBarcodeLib() {
   });
   return BC_LIB;
 }
-/* Scan the photo at full size (a smaller copy loses thin bars); only very large photos (over 4000 px, e.g. 48 MP)
-   are scaled down, to stay inside the phone's canvas limit. */
-function bcShrink(file) {
-  return new Promise((res) => {
-    const img = new Image(), url = URL.createObjectURL(file);
-    img.onload = () => {
-      const k = Math.min(1, 4000 / Math.max(img.naturalWidth, img.naturalHeight));
-      if (k === 1) { URL.revokeObjectURL(url); res(file); return; }
-      const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
-      const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
-      c.toBlob((b) => res(b ? new File([b], 'scan.jpg', { type: 'image/jpeg' }) : file), 'image/jpeg', 0.92);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); res(file); };
-    img.src = url;
-  });
-}
-async function findBarcode(file) {
+/* v82: live barcode scanner. A full-screen camera view opens over the app; the first product barcode it reads
+   closes it and looks the product up. Nothing is photographed or saved. */
+const BC = { scanner: null, busy: false };
+async function barcodeScanOpen() {
+  if (BC.busy) return;
+  BC.busy = true;
+  let ov = $('bc-overlay');
+  if (!ov) {
+    ov = document.createElement('div'); ov.id = 'bc-overlay'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Scan a barcode');
+    // The reader decodes at the box's CSS width, so the camera box is laid out 1000 px wide and shrunk to fit
+    // the screen (a phone-width box missed barcodes in testing).
+    ov.innerHTML = '<div id="bc-wrap"><div id="bc-live"></div></div><p id="bc-msg">Starting the camera…</p>' +
+      // Fallback that always works: the digits printed under the barcode.
+      '<form id="bc-type" autocomplete="off"><input id="bc-num" type="text" inputmode="numeric" pattern="[0-9 ]*" maxlength="16" placeholder="Or type the numbers under it" aria-label="Barcode number"><button type="submit" class="seg">Look up</button></form>' +
+      '<button type="button" class="log" id="bc-cancel">Cancel</button>';
+    document.body.appendChild(ov);
+    $('bc-cancel').addEventListener('click', () => barcodeScanClose());
+    $('bc-type').addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const code = $('bc-num').value.replace(/\D/g, '');
+      if (!/^\d{8,14}$/.test(code)) { $('bc-msg').textContent = 'That needs the 8 or 13 digits under the barcode.'; return; }
+      $('bc-num').value = '';
+      barcodeScanClose().then(() => { if (S.sheet === 'food') barcodeLookup(code); });
+    });
+  }
+  ov.hidden = false; $('bc-msg').textContent = 'Starting the camera…';
   try {
     const lib = await loadBarcodeLib(), F = lib.Html5QrcodeSupportedFormats;
-    let el = document.getElementById('bc-reader');
-    if (!el) { el = document.createElement('div'); el.id = 'bc-reader'; el.setAttribute('aria-hidden', 'true'); el.style.cssText = 'position:fixed;left:-10000px;top:0;width:1200px;height:1px;overflow:hidden'; document.body.appendChild(el); }
-    const r = new lib.Html5Qrcode('bc-reader', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E], verbose: false,
+    BC.scanner = new lib.Html5Qrcode('bc-live', { formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E], verbose: false,
       useBarCodeDetectorIfSupported: true, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
-    const text = await r.scanFile(await bcShrink(file), false);
-    try { r.clear(); } catch (e) { /* nothing to clear */ }
-    return /^\d{8,14}$/.test(String(text)) ? String(text) : null;
-  } catch (e) { return null; }  // no barcode (or the reader couldn't load): carry on as a meal photo
+    let done = false;
+    await BC.scanner.start({ facingMode: 'environment' },
+      // whole frame (a narrow scan box missed barcodes in testing); ask for HD so thin bars stay sharp
+      { fps: 10, videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
+      (text) => {
+        if (done || !/^\d{8,14}$/.test(String(text))) return;
+        done = true;
+        if (navigator.vibrate) navigator.vibrate(60);
+        barcodeScanClose().then(() => { if (S.sheet === 'food') barcodeLookup(String(text)); });
+      }, () => {});
+    bcFit(); clearInterval(BC.fit); BC.fit = setInterval(bcFit, 400);  // the video's size arrives a moment later
+    $('bc-msg').textContent = 'Point the camera at the barcode: level, close enough to fill most of the width';
+  } catch (e) {
+    const denied = /NotAllowed|Permission/i.test(String(e && (e.name || e)));
+    $('bc-msg').textContent = denied ? 'Camera not allowed. Allow camera access for this app in the phone’s Settings, then try again.' : 'Couldn’t start the camera.';
+    BC.busy = false; BC.scanner = null;
+  }
 }
+function bcFit() {
+  const wrap = $('bc-wrap'), live = $('bc-live');
+  if (!wrap || !live) return;
+  const k = Math.min(1, wrap.clientWidth / 1000), h = live.offsetHeight * k;
+  live.style.transform = 'scale(' + k + ')';
+  if (h > 40) wrap.style.height = Math.round(Math.min(h, window.innerHeight * 0.55)) + 'px';
+  live.style.top = Math.min(0, Math.round((wrap.clientHeight - h) / 2)) + 'px';
+}
+window.addEventListener('resize', () => { if (BC.scanner) bcFit(); });
+async function barcodeScanClose() {
+  const sc = BC.scanner; BC.scanner = null;
+  if (sc) { try { await sc.stop(); } catch (e) { /* already stopped */ } try { sc.clear(); } catch (e) { /* nothing to clear */ } }
+  const ov = $('bc-overlay'); if (ov) ov.hidden = true;
+  clearInterval(BC.fit); BC.busy = false;
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden && BC.scanner) barcodeScanClose(); });
 async function barcodeLookup(code) {
   S.barcode = { code, status: 'looking' }; logRender();
   let res = null;
@@ -1133,8 +1166,10 @@ function sheetView() {
     body = barcodeView() + (S.foodPhoto ? '<div class="photo-prev"><img src="' + S.foodPhoto + '" alt="Meal photo"><button type="button" class="icon-btn photo-x" data-act="photo-clear" aria-label="Remove photo">' + X_SVG + '</button></div>' : '') +
       '<div class="food-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="' + (S.foodPhoto ? 'Add a description (optional)' : 'What did you eat?') + '" aria-label="What did you eat" autocomplete="off" enterkeyhint="send">' +
       // v80: one photo button; without "capture" the phone offers Take Photo or Photo Library (v72's library input).
-      '<label class="seg cam-btn" aria-label="Add a photo of the meal">' + CAM_SVG + '<input type="file" id="food-photo-lib" accept="image/*"></label></div>' +
-      (S.photoBusy ? '<p class="small">Checking the photo for a barcode…</p>' : '') +
+      '<label class="seg cam-btn" aria-label="Add a photo of the meal">' + CAM_SVG + '<input type="file" id="food-photo-lib" accept="image/*"></label>' +
+      // v82: barcode scanner (live camera, nothing saved)
+      '<button type="button" class="seg cam-btn" data-act="barcode-scan" aria-label="Scan a barcode">' + BARCODE_SVG + '</button></div>' +
+      (S.photoBusy ? '<p class="small">Preparing the photo…</p>' : '') +
       '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div>';
   } else if (S.sheet === 'activity') {
     btn = '<button type="button" class="log" id="act-log" data-act="activity"' + (actRoute() ? '' : ' disabled') + '>' + (actRoute() === 'inbox' ? 'Send to inbox' : 'Log') + '</button>';
@@ -1180,6 +1215,7 @@ function closeSheet() {
   if (!S.sheet) return;
   S.sheet = null;
   // v39: closing a window drops whatever was selected in it (typed text is kept).
+  if (BC.scanner || BC.busy) barcodeScanClose();
   S.foodPhoto = null; S.barcode = null; S.meds = []; S.doses = {}; S.suppOn = false; S.supps = []; S.bristol = null; S.size = null; S.urgent = false; S.bpain = '';
   S.actType = null; S.actMin = null; S.actEffort = null; S.actMinText = ''; S.moment = [];
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -1612,6 +1648,7 @@ function logAct(el) {
     S.food = ''; S.foodPhoto = null; S.barcode = null; closeSheet();
   }
   else if (act === 'photo-clear') { S.foodPhoto = null; logRender(); }
+  else if (act === 'barcode-scan') { barcodeScanOpen(); }
   else if (act === 'barcode-clear') { if (S.barcode && S.barcode.status === 'found' && S.food === S.barcode.name + (S.barcode.brand ? ' (' + S.barcode.brand + ')' : '')) S.food = ''; S.barcode = null; logRender(); }
   else if (act === 'checkin') {
     const period = S.period || guessPeriod();
