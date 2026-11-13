@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v78 · 13 Nov';
+const APP_VERSION = 'v79 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */

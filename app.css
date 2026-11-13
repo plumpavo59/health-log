@@ -744,7 +744,7 @@ html.share-mode .eyebrow{visibility:hidden}
   .time-pick .time-overlay{position:static;opacity:1;width:auto;height:auto;font:600 15px/1 inherit;font-family:inherit;background:transparent;color:inherit;cursor:text;inset:auto}
 }
 /* v76 Today's 3 / Then */
-.tv .task-tier{font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;margin:18px 0 6px}
+.tv .task-tier{font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:center;margin:18px 0 6px}
 .tv .task-tier:first-child{margin-top:4px}
 /* v77 sleep: one slim row under the quick buttons */
 .sleep-strip{display:flex;align-items:center;gap:8px;margin:10px 0 2px;flex-wrap:nowrap;overflow:hidden}
