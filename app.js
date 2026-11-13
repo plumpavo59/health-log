@@ -3636,7 +3636,7 @@ function sleepView(T2) {
   svg += '</svg>';
   const sel = TR.night && list.find((x) => x.key === TR.night);
   if (sel) svg += nightDetail(sel);
-  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span>' + (list.some((x) => x.d.np) ? '<span><i class="sl-k sl-napk"></i>Nap that day</span>' : '') + '<span><i class="sl-k sl-lie"></i>In bed before sleep, and time to get up (awake or dozing)</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual: fell asleep ' + (uBed !== null ? clockText(uBed) : '–') + ', woke ' + (uWoke !== null ? clockText(uWoke) : '–') + '</span></div>' +
+  html += svg + '<div class="tr-key"><span><i class="sl-k sl-q3"></i>Good (7+)</span><span><i class="sl-k sl-q2"></i>OK</span><span><i class="sl-k sl-q1"></i>Poor (5 or less)</span><span><i class="sl-k sl-qn"></i>Not rated</span>' + (list.some((x) => x.d.np) ? '<span><i class="sl-k sl-napk"></i>Nap that day</span>' : '') + '<span><i class="sl-k sl-lie"></i>In bed before sleep, and time to get up (awake or sleeping lightly)</span><span><i class="sl-k sl-tk"></i>Disturbed (1 line per point of 5)</span><span><i class="sl-k sl-uk"></i>Your usual: fell asleep ' + (uBed !== null ? clockText(uBed) : '–') + ', woke ' + (uWoke !== null ? clockText(uWoke) : '–') + '</span></div>' +
     '' + patBtn('sleep', 'Sleep patterns');
   return html;
 }
