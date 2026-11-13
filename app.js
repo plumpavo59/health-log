@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v79 · 13 Nov';
+const APP_VERSION = 'v80 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -1046,9 +1046,8 @@ function sheetView() {
     // v56: a camera button; the photo goes to Drive › Meal photo logs and the meal is marked to be interpreted later.
     body = (S.foodPhoto ? '<div class="photo-prev"><img src="' + S.foodPhoto + '" alt="Meal photo"><button type="button" class="icon-btn photo-x" data-act="photo-clear" aria-label="Remove photo">' + X_SVG + '</button></div>' : '') +
       '<div class="food-row"><input type="text" id="food-input" data-field="food" value="' + esc(S.food) + '" placeholder="' + (S.foodPhoto ? 'Add a description (optional)' : 'What did you eat?') + '" aria-label="What did you eat" autocomplete="off" enterkeyhint="send">' +
-      '<label class="seg cam-btn" aria-label="Take a photo of the meal">' + CAM_SVG + '<input type="file" id="food-photo" accept="image/*" capture="environment"></label>' +
-      // v72: or pick one already taken, from the photo library.
-      '<label class="seg cam-btn" aria-label="Choose a photo from your library">' + IMG_SVG + '<input type="file" id="food-photo-lib" accept="image/*"></label></div>' +
+      // v80: one photo button; without "capture" the phone offers Take Photo or Photo Library (v72's library input).
+      '<label class="seg cam-btn" aria-label="Add a photo of the meal">' + CAM_SVG + '<input type="file" id="food-photo-lib" accept="image/*"></label></div>' +
       (S.photoBusy ? '<p class="small">Preparing the photo…</p>' : '') +
       '<div class="chips">' + (cfg.foods || []).map((f) => '<button type="button" class="chip food" data-act="food-chip" data-v="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div>';
   } else if (S.sheet === 'activity') {
