@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v74 · 13 Nov';
+const APP_VERSION = 'v75 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -699,7 +699,7 @@ function sleepCardView() {
     '<small>' + (m[k] ? esc(m[k].hm) + (m[k].place && !/^home$/i.test(m[k].place) ? ' · ' + esc(m[k].place) : '') + (m[k].row ? ' · change' : '')
       : ring ? 'ring ' + esc(ring) + ' · tap to log' : 'tap to log') + '</small></button>';
   const ringLine = n.bt || n.wk
-    ? 'Ring: asleep ' + esc(n.bt || '?') + ' · woke ' + esc(n.wk || '?') + (n.last ? ' (dozing till ' + esc(n.last) + ')' : '') + (typeof n.sl === 'number' ? ' · ' + n.sl + ' h' : '')
+    ? 'Ring: asleep ' + esc(n.bt || '?') + ' · woke ' + esc(n.wk || '?') + (n.last ? ' (in bed til ' + esc(n.last) + ')' : '') + (typeof n.sl === 'number' ? ' · ' + n.sl + ' h' : '')
     : 'Ring sleep not in yet';
   return '<section class="card sleep-card" aria-label="Sleep times">' +
     '<div class="sleep-row"><span class="sleep-h">Last night</span>' + btn('lastbed', 'Into bed', n.ib) + '<p class="small sleep-ring">' + ringLine + '</p></div>' +
@@ -3060,8 +3060,8 @@ const minText = (m) => { m = Math.round(m); return m >= 60 ? Math.floor(m / 60) 
 function nightDetail(x) {
   const d = x.d, o = d.os || {};
   let h = '<div class="night-det"><div class="nd-h"><b>Night to ' + esc(longDate(x.key)) + '</b><button type="button" class="link-btn" data-tr="night" data-v="' + x.key + '">Close</button></div>';
-  // v65 (job 17): woke = when you really woke; Oura's later "last asleep" shows as dozing.
-  const times = [d.ib ? 'into bed ' + d.ib : '', d.bt ? 'asleep ' + d.bt : '', d.wk ? 'woke ' + d.wk : '', o.last && o.last !== d.wk ? 'dozing till ' + o.last : '', d.up ? 'up ' + d.up + (o.upGuess ? ' (Oura’s guess)' : '') : ''].filter(Boolean).join(' · ');
+  // v65 (job 17): woke = when you really woke; Oura's later "last asleep" shows as "in bed til".
+  const times = [d.ib ? 'into bed ' + d.ib : '', d.bt ? 'asleep ' + d.bt : '', d.wk ? 'woke ' + d.wk : '', o.last && o.last !== d.wk ? 'in bed til ' + o.last : '', d.up ? 'up ' + d.up + (o.upGuess ? ' (Oura’s guess)' : '') : ''].filter(Boolean).join(' · ');
   if (times) h += '<p class="small">' + esc(times) + '</p>';
   if (o.hy) {
     // Hypnogram: one letter per 5 minutes (D deep, L light, R REM, A awake), "|" between sleep periods.
@@ -3075,7 +3075,7 @@ function nightDetail(x) {
   const cells = [cell('Asleep', giNum(d.sl) ? d.sl + ' h' : ''), cell('Oura sleep score', o.ss), cell('Your rating', giNum(d.q) ? d.q + '/10' : ''), cell('Disturbed (yours)', giNum(d.z) ? d.z + '/5' : ''),
     cell('HRV', o.hrv !== undefined ? o.hrv + ' ms' : ''), cell('Lowest heart rate', o.hr !== undefined ? o.hr + ' bpm' : ''), cell('Readiness', o.rd),
     cell('Deep / REM / light', o.dp !== undefined ? o.dp + ' / ' + (o.rem || 0) + ' / ' + (o.lt || 0) + ' h' : ''), cell('Awake in the night', o.awk !== undefined ? o.awk + ' min' : ''),
-    cell('In bed before sleep', o.inb !== undefined ? o.inb + ' min' : ''), cell('Time to get up', o.tgu !== undefined ? minText(o.tgu) : o.lie !== undefined ? o.lie + ' min' : ''), cell('Dozing after waking', o.doz ? o.doz + ' min' : ''), cell('Nap that day', giNum(d.np) && d.np > 0 ? d.np + ' h' : '')].join('');
+    cell('In bed before sleep', o.inb !== undefined ? o.inb + ' min' : ''), cell('Time to get up', o.tgu !== undefined ? minText(o.tgu) : o.lie !== undefined ? o.lie + ' min' : ''), cell('Light sleep after waking', o.doz ? o.doz + ' min' : ''), cell('Nap that day', giNum(d.np) && d.np > 0 ? d.np + ' h' : '')].join('');
   if (cells) h += '<div class="pt-stats nd-grid">' + cells + '</div>';
   if (!d.os && x.key < OURA_FROM) h += '<p class="small">Before the Oura ring: from your own check-ins.</p>';
   return h + '</div>';
@@ -3574,7 +3574,7 @@ function nightOf(d) {
   // v57: time in bed (into bed → out of bed) and time to fall asleep (into bed → asleep), only when both ends were recorded.
   const tib = inBed !== null && up !== null && up > inBed ? (up - inBed) / 60 : null;
   const lat = inBed !== null && bed !== null && bed >= inBed ? bed - inBed : null;
-  // v65: time to get up = woke → out of bed (how hard it is to get up, awake or dozing).
+  // v65: time to get up = woke → out of bed (how hard it is to get up, awake or sleeping lightly).
   const tgu = woke !== null && up !== null && up >= woke && up - woke < 8 * 60 ? up - woke : null;
   return { bed, woke, up, inBed, hours, tib, lat, tgu, q: giNum(d.q) ? d.q : null, z: giNum(d.z) ? d.z : null };
 }
@@ -3593,7 +3593,7 @@ function sleepView(T2) {
   };
   const minsWord = (dm) => { const m = Math.round(Math.abs(dm)); return m < 15 ? 'about usual' : (m >= 60 ? (m / 60).toFixed(1).replace('.0', '') + ' h' : m + ' min') + (dm > 0 ? ' later than usual' : ' earlier than usual'); };
   const numWord = (unit, more, less) => (dv) => (Math.abs(dv) < 0.25 ? 'about usual' : Math.abs(dv).toFixed(1) + unit + ' ' + (dv > 0 ? more : less) + ' than usual');
-  let html = '<h2 class="tr-h">Sleep' + infoI('Each bar is one night, from falling asleep (bottom) up to waking (top); the dashed part above is the time to get up (from really waking, awake or dozing, to out of bed). Since the ring, woke = the first proper waking after your last deep sleep, not Oura’s last scrap of light sleep. Colour = sleep quality; grey = not rated. White lines = how disturbed (one per point out of 5). Dashed lines = your usual sleep and waking times (the 4 weeks before the last 7 nights). Time in bed (into bed → out of bed) and time to fall asleep (into bed → asleep) only count nights where both times were recorded. Naps aren’t included in hours asleep.') + '</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
+  let html = '<h2 class="tr-h">Sleep' + infoI('Each bar is one night, from falling asleep (bottom) up to waking (top); the dashed part above is the time to get up (from really waking, awake or still sleeping lightly, to out of bed). Since the ring, woke = the first proper waking after your last deep sleep, not Oura’s last scrap of light sleep. Colour = sleep quality; grey = not rated. White lines = how disturbed (one per point out of 5). Dashed lines = your usual sleep and waking times (the 4 weeks before the last 7 nights). Time in bed (into bed → out of bed) and time to fall asleep (into bed → asleep) only count nights where both times were recorded. Naps aren’t included in hours asleep.') + '</h2><div class="tr-sub">Last 7 nights · averages, compared with the 4 weeks before</div><div class="tr-stats">' +
     stat('Fell asleep at', 'bed', clockText, minsWord) +
     stat('Hours asleep', 'hours', (v) => v.toFixed(1), (dv) => numWord(' h', 'more', 'less')(dv) + (T2.list.slice(-7).some((x) => x.d.np) ? ' · nights only, a nap not counted' : '')) +
     stat('Time in bed', 'tib', (v) => v.toFixed(1) + ' h', numWord(' h', 'more', 'less')) +
