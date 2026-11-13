@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v86 · 13 Nov';
+const APP_VERSION = 'v87 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -443,7 +443,7 @@ const dayNum = (a, b) => Math.round((keyToDate(b) - keyToDate(a)) / 86400000) + 
    / break / pause / taper sit in the same part of the step (label, or a clause of CHANGE split at ; or .), so
    "Stop probiotic and antihistamine; Elvanse … continue" plans only the probiotic off. A routine medicine
    (Per day above 0) with nothing logged on a past day outside a planned break, since its first logged dose, is
-   "not logged" (the tracker's rule: a missing dose is unknown, not proven missed). */
+   "missed" (v87, Ru 13 Nov: the recent gaps were all real misses). */
 const PLAN_OFF = /\b(off|stop|stopped|stopping|break|pause|paused|taper)\b/i, PLAN_KEEP = /\b(continue|continues|steady|keep)\b/i;
 const MED_OFF_CACHE = {};
 function medPlanOff(name) {
@@ -458,9 +458,9 @@ function medDayState(name, d, k, today) {
   if ((d.byDay[k] || 0) > 0) return '';
   const off = medPlanOff(name).find((x) => k >= x.from && k <= x.to);
   if (off) return { cls: 'planned', tip: 'planned break (' + off.label + ')' };
-  if (!(d.perDay > 0) || k >= today) return '';
+  if (!d.routine || k >= today) return '';  // as-needed (Per day 0, e.g. co-codamol, paracetamol) never shows as missed
   if (d.first === undefined) d.first = Object.keys(d.byDay).filter((x) => d.byDay[x] > 0).sort()[0] || '';
-  return d.first && k > d.first ? { cls: 'nolog', tip: 'not logged' } : '';
+  return d.first && k > d.first ? { cls: 'nolog', tip: 'missed' } : '';  // Ru, 13 Nov: recent gaps are real misses
 }
 function stepState(st, today) {
   if (st.to && st.to < today) return 'done';
@@ -629,21 +629,25 @@ function medCounts() {
         names[k] = (names[k] || []).concat(r.supps.filter((x) => !(names[k] || []).includes(x)));
       }
     });
-    map[m.name] = { perDay: m.perDay || 1, byDay, mg, unknown, supps: !!m.supps, names };
+    map[m.name] = { perDay: m.perDay || 1, routine: Number(m.perDay) > 0, byDay, mg, unknown, supps: !!m.supps, names };
   });
-  // v30: Supplements sit just above the as-needed medicines (Per day 0, e.g. co-codamol, paracetamol).
-  return suppFirst(map);
+  // v87: Ru's order (13 Nov); anything not named keeps its place after them.
+  const out = {};
+  Object.keys(map).sort(medOrder).forEach((n) => { out[n] = map[n]; });
+  return out;
 }
+/* v87 (Ru, 13 Nov): the order medicines are listed in, and medicines kept out of the Log tab (not expected again)
+   but still shown on Health › Meds with their history. */
+const MED_ORDER = ['Elvanse', 'Omeprazole', 'Amitriptyline', 'Probiotic', 'Supplements', 'Celecoxib', 'Co-codamol', 'Paracetamol'];
+const MED_LOG_HIDDEN = ['Celecoxib'];
+function medOrder(a, b) {
+  const ia = MED_ORDER.findIndex((x) => x.toLowerCase() === String(a.name || a).toLowerCase()), ib = MED_ORDER.findIndex((x) => x.toLowerCase() === String(b.name || b).toLowerCase());
+  return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+}
+const logMeds = () => (cfg.meds || []).filter((m) => !MED_LOG_HIDDEN.includes(m.name)).slice().sort(medOrder);
 
 const suppWord = (n) => (n >= 2 ? 'all due taken' : 'some taken');
 const asNeeded = (name) => (cfg.meds || []).some((m) => m.name === name && Number(m.perDay) === 0);
-function suppFirst(map) {
-  if (!map.Supplements) return map;
-  const out = {};
-  Object.keys(map).forEach((n) => { if (asNeeded(n) && !out.Supplements) out.Supplements = map.Supplements; if (n !== 'Supplements') out[n] = map[n]; });
-  if (!out.Supplements) out.Supplements = map.Supplements;
-  return out;
-}
 
 function historyView(mode) {
   const health = mode === 'health';
@@ -657,6 +661,7 @@ function historyView(mode) {
     '<div class="hist-row head"><span class="small">Last 14 days</span><span class="hist-letters" aria-hidden="true">' +
     keys.map((k) => (k === today ? '<b>' : '<span>') + L[keyToDate(k).getDay()] + (k === today ? '</b>' : '</span>')).join('') + '</span><span></span></div>';
   Object.keys(data).forEach((name) => {
+    if (!health && MED_LOG_HIDDEN.includes(name)) return;  // v87: kept on Health › Meds only
     const d = data[name];
     const taken = keys.filter((k) => (d.byDay[k] || 0) > 0).length;
     const open = health ? TR.medOpen === name : S.calMed === name;
@@ -667,7 +672,7 @@ function historyView(mode) {
     if (!health && S.calMed === name) html += calendarView(name, d, today, cls);
   });
   const keyNote = Object.keys(data).some((name) => keys.some((k) => medDayState(name, data[name], k, today)))
-    ? '<div class="hist-key small"><span><i class="hk on"></i>Logged</span><span><i class="hk planned"></i>Planned break</span><span><i class="hk nolog"></i>Not logged (routine dose)</span></div>' : '';
+    ? '<div class="hist-key small"><span><i class="hk on"></i>Logged</span><span><i class="hk planned"></i>Planned break</span><span><i class="hk nolog"></i>Missed (routine dose)</span></div>' : '';
   return html + keyNote + '</div>';
 }
 
@@ -1181,7 +1186,7 @@ function medTakenToday(m) {
 function quickCount(kind) {
   if (kind === 'meds') {
     // Routine medicines ("Per day" above 0 in Log settings): how many of today's doses are logged, and how many are left.
-    const routine = (cfg.meds || []).filter((m) => Number(m.perDay) > 0 && !maxTabs(m));
+    const routine = logMeds().filter((m) => Number(m.perDay) > 0 && !maxTabs(m));
     // All supplements together count as one daily item.
     const sup = suppList().length ? 1 : 0;
     const total = routine.reduce((t, m) => t + Number(m.perDay), 0) + sup;
@@ -1211,7 +1216,7 @@ function sheetView() {
     const suppChip = sup.length ? '<button type="button" class="chip med" data-act="supp-toggle" aria-pressed="' + S.suppOn + '"><small class="dose-top">' + sup.length + ' to choose</small><span class="med-name"><b>Supplements</b>' + (suppDoneToday() ? '<span class="taken" aria-label="logged today">✓</span>' : '') + '</span></button>' : '';
     // v39: what's still to take today comes first, then what's done, then the as-needed ones.
     const chip = (m) => '<button type="button" class="chip med" data-act="med" data-v="' + esc(m.name) + '" aria-pressed="' + S.meds.includes(m.name) + '"><small class="dose-top">' + esc(chipDoseTop(m)) + '</small><span class="med-name"><b>' + esc(m.name) + '</b>' + takenMark(m) + '</span></button>';
-    const all = cfg.meds || [], hk = healthKey(new Date());
+    const all = logMeds(), hk = healthKey(new Date());
     const nToday = (m) => (((cfg.today || {}).meds || {})[m.name] || 0) + recent.filter((r) => r.kind === 'meds' && r.hday === hk && notYetInSheet(r) && (r.meds || []).includes(m.name)).length;
     const routine = all.filter((m) => Number(m.perDay) !== 0), asNeededMeds = all.filter((m) => Number(m.perDay) === 0);
     const due = routine.filter((m) => nToday(m) < (m.perDay || 1)), done = routine.filter((m) => nToday(m) >= (m.perDay || 1));
@@ -3930,7 +3935,7 @@ function medsView(today) {
   html += stats.length ? '<div class="pt-stats tr-medstats">' + stats.map((x) => '<div class="pt-cell"><span>' + esc(x.label) + '</span><b>' + esc(x.value) + '</b><small>' + esc(x.sub) + '</small></div>').join('') + '</div>'
     : '<p class="small">No ' + esc(cur) + ' logged in the last four months.</p>';
   if (taken.length >= 3) html += patBtn('medfx:' + cur, 'What ' + (d.supps ? 'supplements seem' : cur + ' seems') + ' to do');
-  return html + '<p class="small tr-hint">Dark = logged' + (medPlanOff(cur).length ? ', striped = planned break' : '') + (d.perDay > 0 ? ', red outline = routine dose not logged' : '') + (d.supps ? ', half = some of the ones due' : d.perDay > 1 ? ', half = some of ' + d.perDay + ' doses' : '') + (d.mg ? ', small number = mg' : '') + '. Counts logged doses only; before 4am counts as the night before.</p>';
+  return html + '<p class="small tr-hint">Dark = logged' + (medPlanOff(cur).length ? ', striped = planned break' : '') + (d.routine ? ', red outline = routine dose missed' : '') + (d.supps ? ', half = some of the ones due' : d.perDay > 1 ? ', half = some of ' + d.perDay + ' doses' : '') + (d.mg ? ', small number = mg' : '') + '. Counts logged doses only; before 4am counts as the night before.</p>';
 }
 /* v69: "What it seems to do" for each medicine (Meds tab › a medicine › button). Compares days it was taken with days
    it wasn't, inside the time you were using it (from the first dose to 3 days after the last), on every measure
