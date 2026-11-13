@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v83 · 13 Nov';
+const APP_VERSION = 'v84 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -953,10 +953,13 @@ function barcodeView() {
     // v83: how much was eaten. Portion and pack sizes come from Open Food Facts when it has them.
     const chips = bcAmounts(b).map((a) => '<button type="button" class="chip" data-act="bc-amt" data-v="' + a.key + '" aria-pressed="' + (S.bcAmt === a.key) + '">' + esc(a.label) + '</button>').join('') +
       '<button type="button" class="chip" data-act="bc-amt" data-v="g" aria-pressed="' + (S.bcAmt === 'g') + '">Grams…</button>';
+    // v84: typing grams puts the box straight under the name (ingredients hidden meanwhile) so the keyboard can't cover it.
+    const typing = S.bcAmt === 'g';
     return '<div class="bc-card found"><div><b>' + esc(b.name) + '</b>' + (b.brand || b.qty ? '<small>' + esc([b.brand, b.qty].filter(Boolean).join(' · ')) + '</small>' : '') +
-      (b.ingredients ? '<small class="bc-ing">' + esc(b.ingredients) + '</small>' : '<small>No ingredients listed</small>') +
-      '<div class="bc-amt"><span>How much?</span><div class="chips">' + chips + '</div>' +
-      (S.bcAmt === 'g' ? '<input type="text" inputmode="decimal" class="edit-text bc-grams" data-field="bcGrams" maxlength="6" placeholder="Grams eaten" value="' + esc(S.bcGrams || '') + '">' : '') + '</div>' +
+      (typing ? '<div class="bc-grams-row"><input type="text" inputmode="decimal" class="bc-grams" data-field="bcGrams" maxlength="6" placeholder="0" aria-label="Grams eaten" value="' + esc(S.bcGrams || '') + '"><span>g eaten' + (b.packG ? ' (pack ' + b.packG + ' g)' : '') + '</span>' +
+        '<button type="button" class="link-btn" data-act="bc-amt" data-v="g">Back</button></div>'
+        : (b.ingredients ? '<small class="bc-ing">' + esc(b.ingredients) + '</small>' : '<small>No ingredients listed</small>') +
+          '<div class="bc-amt"><span>How much?</span><div class="chips">' + chips + '</div></div>') +
       '<div class="bc-actions"><button type="button" class="link-btn" data-act="barcode-rescan">Scan again</button><button type="button" class="link-btn" data-act="barcode-clear">Clear</button></div></div></div>';
   }
   return '<div class="bc-card"><span>' + (b.status === 'missing' ? 'Barcode ' + esc(b.code) + ' isn’t in Open Food Facts. Type what it is; the barcode is kept.' : 'Couldn’t look up barcode ' + esc(b.code) + ' (no connection?). Type what it is; the barcode is kept.') + '</span>' + x + '</div>';
@@ -964,8 +967,10 @@ function barcodeView() {
 function bcAmounts(b) {
   const out = [];
   if (b.servG && (!b.packG || b.servG < b.packG)) {
-    out.push({ key: 's1', label: '1 portion (' + b.servG + ' g)', g: b.servG, text: b.servG + ' g (1 portion)' });
-    if (!b.packG || b.servG * 2 < b.packG) out.push({ key: 's2', label: '2 portions (' + b.servG * 2 + ' g)', g: b.servG * 2, text: b.servG * 2 + ' g (2 portions)' });
+    // Open Food Facts' "serving" can be one biscuit rather than a pack's inner portion, so say what it is.
+    const one = b.serving && b.serving.length <= 22 && /\d/.test(b.serving) ? b.serving : b.servG + ' g';
+    out.push({ key: 's1', label: '1 serving: ' + one, g: b.servG, text: b.servG + ' g (1 serving)' });
+    if (!b.packG || b.servG * 2 < b.packG) out.push({ key: 's2', label: '2 servings (' + b.servG * 2 + ' g)', g: b.servG * 2, text: b.servG * 2 + ' g (2 servings)' });
   } else if (b.packG) out.push({ key: 'half', label: 'Half (' + Math.round(b.packG / 2) + ' g)', g: Math.round(b.packG / 2), text: Math.round(b.packG / 2) + ' g (half the pack)' });
   out.push({ key: 'all', label: 'Whole pack' + (b.packG ? ' (' + b.packG + ' g)' : ''), g: b.packG, text: (b.packG ? b.packG + ' g ' : '') + '(whole pack)' });
   return out;
@@ -1027,6 +1032,11 @@ function todayListHtml(kind) {
     const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
     ROOT.style.setProperty('--kb', kb + 'px');
     ROOT.style.setProperty('--vvh', vv.height + 'px');
+    // v84: once the keyboard has settled, bring the box being typed in back into view
+    const a = document.activeElement;
+    if (kb > 0 && a && a.closest && a.closest('#sheet') && /^(INPUT|TEXTAREA)$/.test(a.tagName)) {
+      clearTimeout(fit.t); fit.t = setTimeout(() => { try { a.scrollIntoView({ block: 'center' }); } catch (err) {} }, 120);
+    }
   };
   vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); fit();
 })();
@@ -1034,6 +1044,7 @@ document.addEventListener('focusin', (e) => {
   const t = e.target;
   if (!t || !t.closest || !t.closest('#sheet') || !/^(INPUT|TEXTAREA)$/.test(t.tagName) || /^(range|checkbox|radio|datetime-local)$/.test(t.type)) return;
   setTimeout(() => { try { t.scrollIntoView({ block: 'nearest' }); } catch (err) {} }, 320);
+  setTimeout(() => { try { if (document.activeElement === t) t.scrollIntoView({ block: 'nearest' }); } catch (err) {} }, 700);
 });
 /* Safety net: a medication entry this phone saved whose rows have since gone from the sheet (seen on 28 and
    29 Oct, cause unknown). Only checked against a sheet read taken after the save. */
@@ -1690,7 +1701,7 @@ function logAct(el) {
     S.barcode = null; S.bcAmt = null; S.bcGrams = ''; logRender();
     if (act === 'barcode-rescan') barcodeScanOpen();
   }
-  else if (act === 'bc-amt') { S.bcAmt = S.bcAmt === v ? null : v; logRender(); if (v === 'g') { const g = document.querySelector('#sheet .bc-grams'); if (g) g.focus(); } }
+  else if (act === 'bc-amt') { S.bcAmt = S.bcAmt === v ? null : v; logRender(); if (S.bcAmt === 'g') { const g = document.querySelector('#sheet .bc-grams'); if (g) g.focus(); } }
   else if (act === 'checkin') {
     const period = S.period || guessPeriod();
     const stage = period === 'Wake' ? (S.stage || guessStage()) : '';

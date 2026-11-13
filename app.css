@@ -778,3 +778,9 @@ html.share-mode .eyebrow{visibility:hidden}
 .bc-amt .chips{display:flex;flex-wrap:wrap;gap:6px}.bc-amt .chip{font-size:13px;padding:6px 10px;min-height:34px}
 .bc-amt .bc-grams{margin-top:8px;width:140px}
 .bc-actions{display:flex;gap:18px;margin-top:10px}
+/* v84 grams box: big, right under the product name */
+.bc-grams-row{display:flex;align-items:center;gap:10px;margin-top:10px}
+.bc-grams-row .bc-grams{width:96px;font-size:22px;font-weight:600;text-align:center;padding:8px 6px;border-radius:10px;border:1px solid var(--line2,var(--line));background:transparent;color:inherit}
+.bc-grams-row span{font-size:14px;color:var(--text2);flex:1}
+#sheet .bc-grams-row input.bc-grams{width:96px;min-width:0;flex:0 0 96px}
+#sheet .bc-grams-row span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
