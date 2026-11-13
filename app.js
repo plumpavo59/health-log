@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v75 · 13 Nov';
+const APP_VERSION = 'v76 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -1642,8 +1642,8 @@ function todayMarkup() {
     '<section id="day-notes" class="notes-panel" aria-label="Day notes" hidden></section>' +
     '<section id="day-calendar" aria-label="Calendar and plan" hidden></section>' +
     '<section id="today-tasks" class="task-list" aria-label="Tasks"><div id="focus"></div></section>' +
-    '<section class="optional-section"><button id="toggle" type="button" aria-expanded="false" aria-controls="optional">Show optional work</button>' +
-      '<div id="optional" hidden><h2>Optional</h2><div id="extra"></div></div></section>' +
+    '<section class="optional-section"><button id="toggle" type="button" aria-expanded="false" aria-controls="optional">If there’s time</button>' +
+      '<div id="optional" hidden><h2 class="task-tier">If there’s time</h2><div id="extra"></div></div></section>' +
     '<section id="logging" class="lower-section" aria-label="Inbox"><form id="log-form">' +
       '<textarea id="log-text" aria-label="Add something to your inbox" rows="2" maxlength="20000" placeholder="Add to inbox…"></textarea>' +
       '<div class="logging-actions"><button id="save-log" type="submit">Add to inbox</button></div>' +
@@ -1664,7 +1664,7 @@ function buildToday() {
   $('toggle').onclick = () => {
     const showing = $('optional').hidden;
     $('optional').hidden = !showing;
-    $('toggle').textContent = showing ? 'Hide optional work' : 'Show optional work';
+    $('toggle').textContent = showing ? 'Hide' : 'If there’s time';
     $('toggle').setAttribute('aria-expanded', String(showing));
   };
   $('toggle-logs').onclick = () => {
@@ -1890,7 +1890,7 @@ function taskRow(task) {
   label.className = 'task-text';
   const name = document.createElement('div');
   name.appendChild(linkified(task.name));
-  if (task.fromLabel) { const tag = document.createElement('span'); tag.className = 'carry-tag'; tag.textContent = 'from ' + task.fromLabel.replace(/ \d+ \w+$/, ''); tag.title = 'Not done on ' + task.fromLabel; name.appendChild(tag); }
+  // v76: no "from Tue" tag on unfinished tasks from earlier days (it made low-stakes tasks feel late).
   label.appendChild(name);
   if (task.description) {
     const desc = document.createElement('div');
@@ -1906,7 +1906,7 @@ function taskRow(task) {
   return row;
 }
 
-/* Unfinished tasks from earlier days show on the normal Today view, tagged "from Tue". Nothing is moved in Todoist. */
+/* Unfinished tasks from earlier days show on the normal Today view (untagged since v76). Nothing is moved in Todoist. */
 function carriedTasks() {
   if (!T.carry || T.manual || T.loadedDate !== londonWorkingDay(T.rolloverMinutes)) return [];
   const have = new Set(T.tasks.map((t) => t.id));
@@ -1915,23 +1915,37 @@ function carriedTasks() {
 async function loadCarryOver() {
   if (!Conn.paired() || T.manual) return;
   const saved = LS.get('cache.carry', null);
-  if (saved && !T.carry) { T.carry = saved.tasks; renderTasks(); }
+  if (saved && !T.carry) { T.carry = saved.tasks; T.prio = saved.prio || {}; renderTasks(); }
   try {
     const res = await dash('getCarryOver', []);
     T.carry = (res && res.tasks) || [];
-    LS.set('cache.carry', { at: Date.now(), tasks: T.carry });
+    T.prio = (res && res.prio) || {};
+    LS.set('cache.carry', { at: Date.now(), tasks: T.carry, prio: T.prio });
     renderTasks();
   } catch (e) {}
 }
 
+/* v76: Today's 3 = tasks with Todoist's red flag (P1; priority 4 in Todoist's data), at most 3, only on days
+   something really has to be done today; then the rest ("Then"); optional ones fold under "If there's time".
+   Priorities come with getCarryOver (Optional-tasks v76); without them the list is one block as before. */
+const isTop = (t) => Number(t.priority || (T.prio && T.prio[t.id]) || 1) === 4;
 function renderTasks() {
   $('focus').replaceChildren(); $('extra').replaceChildren();
   const all = T.tasks.concat(carriedTasks());
-  const core = all.filter((t) => !t.optional), extra = all.filter((t) => t.optional);
+  let core = all.filter((t) => !t.optional);
+  const extra = all.filter((t) => t.optional);
+  const top = T.manual ? [] : core.filter(isTop).slice(0, 3);
+  if (top.length) {
+    const head = (txt) => { const h = document.createElement('h2'); h.className = 'task-tier'; h.textContent = txt; return h; };
+    $('focus').appendChild(head('Today’s 3'));
+    top.forEach((t) => $('focus').appendChild(taskRow(t)));
+    core = core.filter((t) => top.indexOf(t) < 0);
+    if (core.length) $('focus').appendChild(head('Then'));
+  }
   core.forEach((t) => $('focus').appendChild(taskRow(t)));
   extra.forEach((t) => $('extra').appendChild(taskRow(t)));
-  if (!core.length) $('focus').textContent = 'Nothing selected for this day.';
-  if (!extra.length) $('extra').textContent = 'No optional tasks selected.';
+  if (!core.length && !top.length) $('focus').textContent = 'Nothing selected for this day.';
+  if (!extra.length) $('extra').textContent = 'Nothing extra today.';
 }
 
 setInterval(() => {
