@@ -733,3 +733,8 @@ html.share-mode .eyebrow{visibility:hidden}
 .pt-list{margin:4px 0 8px;padding-left:18px;font-size:13.5px;line-height:1.45}.pt-list li{margin:2px 0}.pt-med td:first-child{width:38%}.pt-med td,.pt-med th{width:31%}
 .sleep-card{padding:10px 12px}.sleep-mark{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 6px;font-weight:600}
 .sleep-mark small{font-weight:400;font-size:12px;color:var(--muted2)}.sleep-mark.done small{color:inherit;opacity:.8}
+/* v74 sleep card: last night / today */
+.sleep-row{display:grid;gap:6px}.sleep-row+.sleep-row{margin-top:10px}
+.sleep-h{font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em}
+.sleep-ring{margin:0;color:var(--text2)}
+.sleep-place{margin:10px 0 4px}

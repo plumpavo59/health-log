@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v73 · 10 Nov';
+const APP_VERSION = 'v74 · 13 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -358,8 +358,11 @@ const wokeToday = () => !!(cfg.today && cfg.today.wakeAt) || recent.some((r) => 
 const upToday = () => !!(cfg.today && cfg.today.upAt) || recent.some((r) => r.hday === healthKey(new Date()) && r.up && r.status !== 'failed');
 function guessPeriod() {
   const now = new Date(), h = now.getHours(), mins = h * 60 + now.getMinutes();
+  if (typeof sleepMarks === 'function' && sleepMarks().bed) return 'Bed';  // v74: "Into bed tonight" logged
   if (mins >= 23 * 60 + 30 || h < 4) return 'Bed';
-  if (h < 12 && !upToday()) return 'Wake';  // v73: was before 14:00; a late start no longer turns a check-in into a wake one
+  // v74: the first check-in before noon assumes he's still in bed, unless he's already out of bed or has done a
+  // check-in today that wasn't in bed; then later ones are day check-ins.
+  if (h < 12 && !upToday() && !uprightToday()) return 'Wake';
   return 'Day';
 }
 const guessStage = () => (wokeToday() ? 'up' : 'bed');
@@ -664,28 +667,43 @@ function calendarView(name, d, today, cls) {
     '<div class="cal-sum">Dark = logged' + (d.mg ? ' · small number = mg that day (? = dose not recorded)' : '') + (d.supps ? ' · half = some of the ones due (Default on the Meds tab)' : d.perDay > 1 ? ' · half = some of ' + d.perDay + ' doses' : '') + ' · before 4am counts as the night before</div></div>';
 }
 
-/* v73: Into bed / Out of bed, separate from check-ins. One tap opens a small window with the time (now, or type
-   the real time later, e.g. "got up 09:30" logged at 15:00); a time already logged opens to change it. Saved as a
-   Check-in row (Period Bed / Getting up, no ratings), which the Oura script and the app read as in bed / out of bed. */
+/* v73/v74: sleep times, separate from check-ins. Three buttons: last night's "Into bed", today's "Out of bed" and
+   "Into bed tonight". One tap opens a small window with the time (now, or the real time typed later); a time already
+   logged opens to change it. Saved as a Check-in row (Period Bed / Getting up, no ratings, "sleep time only"), which
+   the Oura script and the app read as in bed / out of bed. The ring's own night (asleep, woke, hours) shows beside it. */
+const SLEEP_SLOTS = { lastbed: 'Into bed last night', up: 'Out of bed', bed: 'Into bed tonight' };
 function sleepMarks() {
-  const m = (cfg.today && cfg.today.sleepMarks) || {}, out = { bed: null, up: null };
-  const now = Date.now();
-  if (m.bed && now - m.bed.t < 12 * 3600000) out.bed = m.bed;  // a bed time from more than 12 h ago is last night's, not tonight's
-  if (m.up) out.up = m.up;
+  const m = (cfg.today && cfg.today.sleepMarks) || {}, K = healthKey(new Date());
+  const out = { lastbed: m.lastBed || null, up: m.up || null, bed: m.tonightBed || null, night: m.night || null };
   recent.forEach((r) => {
-    if (r.status === 'failed' || !r.sleepMark) return;
-    const t = new Date(r.at).getTime(), mk = { hm: r.hm, t, local: true };
-    if (r.sleepMark === 'bed' && now - t < 12 * 3600000 && (!out.bed || t > out.bed.t)) out.bed = mk;
-    if (r.sleepMark === 'up' && now - t < 20 * 3600000 && (!out.bed || t > out.bed.t) && (!out.up || out.up.local)) out.up = out.up && !out.up.local ? out.up : mk;
+    if (r.status === 'failed' || !r.sleepSlot || r.sleepK !== K) return;
+    if (r.status === 'saved' && cfg.at && r.savedAt && r.savedAt < cfg.at) return;  // already in what the sheet sent back
+    const t = new Date(r.at).getTime();
+    if (!out[r.sleepSlot] || !out[r.sleepSlot].row || t > out[r.sleepSlot].t) out[r.sleepSlot] = { hm: r.hm, t, local: true, place: r.place || '' };
   });
-  if (out.up && out.bed && out.up.t < out.bed.t) out.up = null;
+  if (out.bed && out.up && out.bed.t < out.up.t) out.bed = null;
   return out;
 }
+/* The real date for a typed time, by which button it is (K = today's health day, 04:00–04:00). */
+function sleepSlotDate(slot, hhmm) {
+  const [hh, mm] = hhmm.split(':').map(Number), K = healthKey(new Date());
+  const key = slot === 'lastbed' ? (hh >= 12 ? addDays(K, -1) : K) : slot === 'up' ? (hh < DAY_START_HOUR ? addDays(K, 1) : K) : (hh >= 12 ? K : addDays(K, 1));
+  const d = keyToDate(key); d.setHours(hh, mm, 0, 0);
+  return d;
+}
+const uprightToday = () => !!(cfg.today && cfg.today.upright) ||
+  recent.some((r) => r.hday === healthKey(new Date()) && r.kind === 'checkin' && r.status !== 'failed' && r.period && !/^(Wake|Bed)$/.test(r.period));
 function sleepCardView() {
-  const m = sleepMarks();
-  const btn = (k, label) => '<button type="button" class="seg sleep-mark' + (m[k] ? ' done' : '') + '" data-act="sleep-open" data-v="' + k + '">' + label +
-    '<small>' + (m[k] ? m[k].hm + (m[k].row ? ' · change' : '') : 'tap to log') + '</small></button>';
-  return '<section class="card sleep-card" aria-label="Sleep times"><div class="grid2">' + btn('bed', 'Into bed') + btn('up', 'Out of bed') + '</div></section>';
+  const m = sleepMarks(), n = m.night || {};
+  const btn = (k, label, ring) => '<button type="button" class="seg sleep-mark' + (m[k] ? ' done' : '') + '" data-act="sleep-open" data-v="' + k + '">' + label +
+    '<small>' + (m[k] ? esc(m[k].hm) + (m[k].place && !/^home$/i.test(m[k].place) ? ' · ' + esc(m[k].place) : '') + (m[k].row ? ' · change' : '')
+      : ring ? 'ring ' + esc(ring) + ' · tap to log' : 'tap to log') + '</small></button>';
+  const ringLine = n.bt || n.wk
+    ? 'Ring: asleep ' + esc(n.bt || '?') + ' · woke ' + esc(n.wk || '?') + (n.last ? ' (dozing till ' + esc(n.last) + ')' : '') + (typeof n.sl === 'number' ? ' · ' + n.sl + ' h' : '')
+    : 'Ring sleep not in yet';
+  return '<section class="card sleep-card" aria-label="Sleep times">' +
+    '<div class="sleep-row"><span class="sleep-h">Last night</span>' + btn('lastbed', 'Into bed', n.ib) + '<p class="small sleep-ring">' + ringLine + '</p></div>' +
+    '<div class="sleep-row"><span class="sleep-h">Today</span><div class="grid2">' + btn('up', 'Out of bed', n.up) + btn('bed', 'Into bed tonight') + '</div></div></section>';
 }
 function checkinView() {
   const period = S.period || guessPeriod();
@@ -697,7 +715,7 @@ function checkinView() {
   if (S.open) {
     const stage = S.stage || guessStage();
     const list = (period === 'Wake' && stage === 'bed' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]))
-      .concat(period === 'Bed' ? [['stress', 'Stress today (0–5)', 5]] : []);  // whole-day stress, Stress column (HealthLog v14)
+      .concat(period === 'Bed' || (period === 'Day' && new Date().getHours() >= 18) ? [['stress', 'Stress today (0–5)', 5]] : []);  // whole-day stress (Stress column); v74: also on day check-ins from 18:00
     html += '<div id="check-body" style="display:flex;flex-direction:column;gap:14px">' +
       '<div class="grid3" role="group" aria-label="When">' + ['Wake', 'Day', 'Bed'].map((p) =>
         '<button type="button" class="seg" data-act="period" data-v="' + p + '" aria-pressed="' + (period === p) + '">' + p + '</button>').join('') + '</div>' +
@@ -992,9 +1010,13 @@ function sheetView() {
       '<p class="small">For moments that stand out. Kept separate from your day scores. Tracking since 29 Oct.</p>';
   } else if (S.sheet === 'sleep') {
     const E = S.sleepEdit || {};
+    const place = S.sleepPlace || 'Home';
+    const places = E.mark !== 'up' && !E.row ? '<div class="chips sleep-place" role="group" aria-label="Where">' +
+      ['Home', "Mara's", 'Other'].map((p) => '<button type="button" class="chip' + (place === p ? ' on' : '') + '" aria-pressed="' + (place === p) + '" data-act="sleep-place" data-v="' + esc(p) + '">' + esc(p) + '</button>').join('') + '</div>' +
+      (place === 'Other' ? '<input type="text" class="edit-text" data-field="sleepPlaceOther" maxlength="30" placeholder="Where?" value="' + esc(S.sleepPlaceOther || '') + '">' : '') : '';
     btn = '<button type="button" class="log" data-act="sleep-save"' + (E.busy ? ' disabled' : '') + '>' + (E.row ? 'Save' : 'Log') + '</button>';
-    body = '<label class="edit-row"><span>' + (E.mark === 'up' ? 'Got out of bed at' : 'Got into bed at') + '</span><input type="time" data-field="sleepTime" value="' + esc(S.sleepTime || '') + '"></label>' +
-      '<p class="small">' + (E.row ? 'Changes the time already logged.' : 'A time later than now counts as yesterday.') + (E.error ? ' <b>' + esc(E.error) + '</b>' : '') + '</p>';
+    body = '<label class="edit-row"><span>' + (E.mark === 'up' ? 'Got out of bed at' : E.mark === 'lastbed' ? 'Got into bed last night at' : 'Got into bed at') + '</span><input type="time" data-field="sleepTime" value="' + esc(S.sleepTime || '') + '"></label>' + places +
+      '<p class="small">' + (E.row ? 'Changes the time already logged.' : E.mark === 'lastbed' ? 'Afternoon/evening times count as yesterday.' : E.mark === 'bed' ? 'Times after midnight count as tonight.' : '') + (E.error ? ' <b>' + esc(E.error) + '</b>' : '') + '</p>';
   } else if (S.sheet === 'edit') {
     // v64: change the time (and the words of a meal, activity or note), or delete. Needs HealthLog v64.
     const E = S.edit || {};
@@ -1420,8 +1442,11 @@ function logAct(el) {
     const mk = sleepMarks()[v], now = new Date();
     S.sleepEdit = { mark: v, row: mk && mk.row ? mk.row : null, t: mk ? mk.t : null, hm: mk ? mk.hm : '' };
     S.sleepTime = mk ? mk.hm : pad(now.getHours()) + ':' + pad(now.getMinutes());
+    S.sleepPlace = LS.get('sleepPlace', 'Home'); S.sleepPlaceOther = LS.get('sleepPlaceOther', '');
+    if (S.sleepPlace !== 'Home' && Date.now() - LS.get('sleepPlaceAt', 0) > 20 * 3600000) S.sleepPlace = 'Home';  // somewhere else is remembered for one night only
     openSheet('sleep');
   }
+  else if (act === 'sleep-place') { S.sleepPlace = v; logRender(); }
   else if (act === 'sleep-save') {
     const E = S.sleepEdit;
     if (!E || !/^\d{2}:\d{2}$/.test(S.sleepTime || '')) return;
@@ -1433,11 +1458,18 @@ function logAct(el) {
       editSend('save').then(() => { if (S.edit) { E.busy = false; E.error = S.edit.error || 'Didn’t save. Try again.'; S.edit = null; logRender(); } else S.sleepEdit = null; });
       return;
     }
-    const [hh, mm] = S.sleepTime.split(':').map(Number), d = new Date();
-    d.setHours(hh, mm, 0, 0);
-    if (d.getTime() > Date.now() + 5 * 60000) d.setDate(d.getDate() - 1);
+    const d = sleepSlotDate(E.mark, S.sleepTime);
+    if (d.getTime() > Date.now() + 5 * 60000) { E.error = 'That time hasn’t happened yet.'; logRender(); return; }
+    let place = '';
+    if (E.mark !== 'up') {
+      place = S.sleepPlace === 'Other' ? (S.sleepPlaceOther || '').trim().slice(0, 30) : S.sleepPlace === "Mara's" ? "Mara's" : 'home';
+      LS.set('sleepPlace', S.sleepPlace || 'Home'); LS.set('sleepPlaceAt', Date.now());
+      if (S.sleepPlace === 'Other') LS.set('sleepPlaceOther', place);
+    }
     S.time = d;
-    commit('sleepmark', { mark: E.mark }, (E.mark === 'up' ? 'Out of bed ' : 'Into bed ') + S.sleepTime, E.mark === 'up' ? { up: true, sleepMark: 'up' } : { sleepMark: 'bed' });
+    const label = (E.mark === 'up' ? 'Out of bed ' : E.mark === 'lastbed' ? 'Into bed (last night) ' : 'Into bed ') + S.sleepTime + (place && place !== 'home' ? ' · ' + place : '');
+    commit('sleepmark', place ? { mark: E.mark === 'up' ? 'up' : 'bed', place } : { mark: E.mark === 'up' ? 'up' : 'bed' }, label,
+      { sleepSlot: E.mark, sleepK: healthKey(new Date()), place, up: E.mark === 'up' });
     S.sleepEdit = null; closeSheet();
   }
   else if (act === 'edit-delete') {
@@ -1501,7 +1533,7 @@ function logAct(el) {
     const ciNote = (flags.length ? 'Morning: ' + flags.join('; ') + (S.checkNote.trim() ? '. ' : '') : '') + S.checkNote.trim();
     S.wakeFlags = {};
     commit('checkin', { period, stage, scores: sc, note: ciNote, sleep: times },
-      'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : '') + (flags.length ? ' · ' + flags.map((f) => f.replace(' on waking: yes', '')).join(', ') : ''), { wake: stage === 'bed', up: stage === 'up' });
+      'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : '') + (flags.length ? ' · ' + flags.map((f) => f.replace(' on waking: yes', '')).join(', ') : ''), { wake: period === 'Wake' && stage === 'bed', up: period === 'Wake' && stage === 'up', period });
     S.scores = {}; S.checkNote = ''; S.moment = []; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
   }
   else if (act === 'trial') {
