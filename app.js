@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v87 · 13 Nov';
+const APP_VERSION = 'v88 · 14 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -789,21 +789,22 @@ function sleepTimesHtml() {
    remembered. Saved in the check-in's note as "Watch: heel pain on first steps: no; allodynia: yes", so a chat or
    the audit can count them later. Edit the list here (an editable list in the tracker is job 19(a)). */
 const WATCH = [
-  { key: 'heel', from: '2026-11-13', until: '2026-11-21', once: true, label: 'Heels on first steps out of bed',
+  { key: 'heel', from: '2026-11-13', until: '2026-11-21', once: true, morning: true, label: 'Heels on first steps out of bed',
     opts: [['no', 'Fine'], ['yes', 'Sore']], text: (v) => 'heel pain on first steps: ' + v },
   { key: 'allo', from: '2026-11-13', until: '2026-11-30', label: 'Allodynia (touch that shouldn’t hurt, does)',
     opts: [['yes', 'Yes, now']], text: () => 'allodynia: yes' },
 ];
 function watchActive() {
   const k = healthKey(new Date());
-  return WATCH.filter((w) => k >= w.from && k <= w.until && !(w.once && LS.get('watch.' + w.key, '') === k));
+  const h = new Date().getHours();  // v88 (Ru, 14 Nov): morning items only 04:00–14:00
+  return WATCH.filter((w) => k >= w.from && k <= w.until && !(w.morning && (h < 4 || h >= 14)) && !(w.once && LS.get('watch.' + w.key, '') === k));
 }
 function watchView() {
   const ws = watchActive();
   if (!ws.length) return '';
   return '<div class="watch" role="group" aria-label="Keeping an eye on">' + ws.map((w) => '<div class="watch-row"><span>' + esc(w.label) + '</span><div class="watch-btns">' +
     w.opts.map(([v, l]) => '<button type="button" class="moment-btn" data-act="watch" data-k="' + w.key + '" data-v="' + v + '" aria-pressed="' + (S.watch[w.key] === v) + '">' + esc(l) + '</button>').join('') +
-    '</div></div>').join('') + '<p class="small">Keeping an eye on these during the trial; add where or what in the note.</p></div>';
+    '</div></div>').join('') + '</div>';
 }
 const watchPicked = () => WATCH.filter((w) => S.watch[w.key]);
 const WAKE_FLAGS = [['taste', 'Bad taste', 'bad taste on waking: yes'], ['tinnitus', 'Tinnitus', 'tinnitus on waking: yes'], ['throat', 'Sore throat', 'sore throat on waking: yes']];
