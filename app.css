@@ -797,3 +797,9 @@ html.share-mode .eyebrow{visibility:hidden}
 .hist-key span{display:inline-flex;align-items:center;gap:5px}
 .hk{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--track)}
 .hk.on{background:var(--ink);border-color:var(--ink)}
+/* v89: Quick questions card on Today */
+.questions{display:flex;flex-direction:column;gap:10px;margin:4px 0 14px}
+.q-item{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--card);display:flex;flex-direction:column;gap:8px}
+.q-text{margin:0;font-size:15px;line-height:1.35}
+.q-btns{display:flex;flex-wrap:wrap;gap:6px}
+.q-btns .moment-btn{flex:0 1 auto}

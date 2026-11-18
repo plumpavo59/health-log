@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v88 · 14 Nov';
+const APP_VERSION = 'v89 · 18 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -637,14 +637,20 @@ function medCounts() {
   return out;
 }
 /* v87 (Ru, 13 Nov): the order medicines are listed in, and medicines kept out of the Log tab (not expected again)
-   but still shown on Health › Meds with their history. */
-const MED_ORDER = ['Elvanse', 'Omeprazole', 'Amitriptyline', 'Probiotic', 'Supplements', 'Celecoxib', 'Co-codamol', 'Paracetamol'];
-const MED_LOG_HIDDEN = ['Celecoxib'];
-function medOrder(a, b) {
-  const ia = MED_ORDER.findIndex((x) => x.toLowerCase() === String(a.name || a).toLowerCase()), ib = MED_ORDER.findIndex((x) => x.toLowerCase() === String(b.name || b).toLowerCase());
-  return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+   but still shown on Health › Meds with their history.
+   v89 (18 Nov): both now come from the tracker (Log settings › MEDICATIONS: "List order" and "Log tab" columns;
+   SUPPLEMENTS row: "List order among medicines"), so no medicine names live in this public code.
+   Without them (older receiver) the order is the sheet's row order and nothing is hidden. */
+function medRank(name) {
+  const n = String(name || '').toLowerCase();
+  if (n === 'supplements') return typeof cfg.suppOrder === 'number' ? cfg.suppOrder : 50;
+  const meds = cfg.meds || [], i = meds.findIndex((m) => m.name.toLowerCase() === n);
+  if (i < 0) return 99;
+  return typeof meds[i].order === 'number' ? meds[i].order : i + 1;
 }
-const logMeds = () => (cfg.meds || []).filter((m) => !MED_LOG_HIDDEN.includes(m.name)).slice().sort(medOrder);
+function medOrder(a, b) { return medRank(a.name || a) - medRank(b.name || b); }
+const medLogHidden = (name) => (cfg.meds || []).some((m) => m.name === name && m.logTab === false);
+const logMeds = () => (cfg.meds || []).filter((m) => !medLogHidden(m.name)).slice().sort(medOrder);
 
 const suppWord = (n) => (n >= 2 ? 'all due taken' : 'some taken');
 const asNeeded = (name) => (cfg.meds || []).some((m) => m.name === name && Number(m.perDay) === 0);
@@ -661,7 +667,7 @@ function historyView(mode) {
     '<div class="hist-row head"><span class="small">Last 14 days</span><span class="hist-letters" aria-hidden="true">' +
     keys.map((k) => (k === today ? '<b>' : '<span>') + L[keyToDate(k).getDay()] + (k === today ? '</b>' : '</span>')).join('') + '</span><span></span></div>';
   Object.keys(data).forEach((name) => {
-    if (!health && MED_LOG_HIDDEN.includes(name)) return;  // v87: kept on Health › Meds only
+    if (!health && medLogHidden(name)) return;  // v87: kept on Health › Meds only (v89: set in Log settings)
     const d = data[name];
     const taken = keys.filter((k) => (d.byDay[k] || 0) > 0).length;
     const open = health ? TR.medOpen === name : S.calMed === name;
@@ -743,6 +749,11 @@ function sleepCardView() {
   }
   return body ? '<div class="sleep-strip" role="group" aria-label="Sleep times">' + body + '</div>' : '';
 }
+/* v89 (dashboard backlog 15 + 17 Nov): sleep quality is asked on a Wake "In bed" check-in as before, and also on
+   the first check-in of the health day whatever its period, so a morning that starts with "Getting up" or a Day
+   check-in still gets last night's sleep. */
+const firstCheckinToday = () => !(cfg.today && cfg.today.lastCheckin);
+const sleepAsked = (period, stage) => (period === 'Wake' && stage === 'bed') || firstCheckinToday();
 function checkinView() {
   const period = S.period || guessPeriod();
   const last = cfg.today.lastCheckin ? 'Last: ' + cfg.today.lastCheckin.toLowerCase() : 'None yet today';
@@ -752,7 +763,7 @@ function checkinView() {
     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button></div>';
   if (S.open) {
     const stage = S.stage || guessStage();
-    const list = (period === 'Wake' && stage === 'bed' ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]))
+    const list = (sleepAsked(period, stage) ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]))
       .concat(period === 'Bed' || (period === 'Day' && new Date().getHours() >= 18) ? [['stress', 'Stress today (0–5)', 5]] : []);  // whole-day stress (Stress column); v74: also on day check-ins from 18:00
     html += '<div id="check-body" style="display:flex;flex-direction:column;gap:14px">' +
       '<div class="grid3" role="group" aria-label="When">' + ['Wake', 'Day', 'Bed'].map((p) =>
@@ -787,17 +798,15 @@ function sleepTimesHtml() {
 }
 /* v85 (backlog job 19, first part): a short watch list for the trial period, asked in the check-in instead of
    remembered. Saved in the check-in's note as "Watch: heel pain on first steps: no; allodynia: yes", so a chat or
-   the audit can count them later. Edit the list here (an editable list in the tracker is job 19(a)). */
-const WATCH = [
-  { key: 'heel', from: '2026-11-13', until: '2026-11-21', once: true, morning: true, label: 'Heels on first steps out of bed',
-    opts: [['no', 'Fine'], ['yes', 'Sore']], text: (v) => 'heel pain on first steps: ' + v },
-  { key: 'allo', from: '2026-11-13', until: '2026-11-30', label: 'Allodynia (touch that shouldn’t hurt, does)',
-    opts: [['yes', 'Yes, now']], text: () => 'allodynia: yes' },
-];
+   the audit can count them later.
+   v89 (18 Nov, job 19(a)): the list now lives in the tracker (Log settings › WATCH LIST), sent with the config.
+   Each item: { key, label, from, until, opts: [[value, button]], once, morning, note }. Saved as "<note>: <value>". */
+const watchList = () => (Array.isArray(cfg.watch) ? cfg.watch : []).filter((w) => w && w.key && w.label && Array.isArray(w.opts) && w.opts.length)
+  .map((w) => Object.assign({}, w, { text: (v) => (w.note || w.label) + ': ' + v }));
 function watchActive() {
   const k = healthKey(new Date());
   const h = new Date().getHours();  // v88 (Ru, 14 Nov): morning items only 04:00–14:00
-  return WATCH.filter((w) => k >= w.from && k <= w.until && !(w.morning && (h < 4 || h >= 14)) && !(w.once && LS.get('watch.' + w.key, '') === k));
+  return watchList().filter((w) => k >= w.from && k <= w.until && !(w.morning && (h < 4 || h >= 14)) && !(w.once && LS.get('watch.' + w.key, '') === k));
 }
 function watchView() {
   const ws = watchActive();
@@ -806,7 +815,7 @@ function watchView() {
     w.opts.map(([v, l]) => '<button type="button" class="moment-btn" data-act="watch" data-k="' + w.key + '" data-v="' + v + '" aria-pressed="' + (S.watch[w.key] === v) + '">' + esc(l) + '</button>').join('') +
     '</div></div>').join('') + '</div>';
 }
-const watchPicked = () => WATCH.filter((w) => S.watch[w.key]);
+const watchPicked = () => watchList().filter((w) => S.watch[w.key]);
 const WAKE_FLAGS = [['taste', 'Bad taste', 'bad taste on waking: yes'], ['tinnitus', 'Tinnitus', 'tinnitus on waking: yes'], ['throat', 'Sore throat', 'sore throat on waking: yes']];
 /* Typing guard: background refreshes (saving, config, the 60 s tick) wait until you leave the text box,
    so the box doesn't lose focus mid-word. Taps you make still re-render straight away, keeping your place. */
@@ -1622,8 +1631,8 @@ function logAct(el) {
     // Bring the check-in to the top of the screen so the sliders are in view.
     if (S.open) requestAnimationFrame(() => { const c = document.querySelector('#log-main section[aria-label="Check-in"]'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   }
-  else if (act === 'period') { S.period = v; if (v !== 'Bed') delete S.scores.stress; if (v !== 'Wake' || (S.stage || guessStage()) === 'up') { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
-  else if (act === 'stage') { S.stage = v; if (v === 'up') { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
+  else if (act === 'period') { S.period = v; if (v !== 'Bed') delete S.scores.stress; if (!sleepAsked(v, S.stage || guessStage())) { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
+  else if (act === 'stage') { S.stage = v; if (!sleepAsked(S.period || guessPeriod(), v)) { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
   else if (act === 'bristol') { S.bristol = S.bristol === Number(v) ? null : Number(v); logRender(); }
   else if (act === 'size') { S.size = S.size === v ? null : v; logRender(); }
   else if (act === 'urgent') { S.urgent = !S.urgent; logRender(); }
@@ -1881,6 +1890,7 @@ function todayMarkup() {
     '<div id="extras-status" class="status" role="status" aria-live="polite"></div>' +
     '<section id="day-notes" class="notes-panel" aria-label="Day notes" hidden></section>' +
     '<section id="day-calendar" aria-label="Calendar and plan" hidden></section>' +
+    '<section id="questions" class="questions" aria-label="Quick questions" hidden></section>' +
     '<section id="today-tasks" class="task-list" aria-label="Tasks"><div id="focus"></div></section>' +
     '<section class="optional-section"><button id="toggle" type="button" aria-expanded="false" aria-controls="optional">If there’s time</button>' +
       '<div id="optional" hidden><h2 class="task-tier">If there’s time</h2><div id="extra"></div></div></section>' +
@@ -1971,6 +1981,43 @@ function browseDay(delta) {
 function stampTime(ms) { const d = new Date(ms); return (dayKey(d) === dayKey(new Date()) ? '' : d.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(d); }
 
 /** Shows the saved copy at once (for the normal "today" view), then asks Google for a fresh one. */
+/* v89 (B1, 18 Nov): up to 3 open questions from Life HQ › Questions, answered with one tap. A tap sends
+   "Answer Q-…: <option>" to the inbox (same queue as Add to inbox, so it works offline); the inbox run applies it
+   and marks the question Answered. Answered ones are hidden here straight away. Needs receiver v89 ("questions"). */
+const Q = { items: [], at: 0 };
+async function loadQuestions(force) {
+  if (!Conn.paired() || SHARE_ID) return;
+  if (force || Date.now() - Q.at > 10 * 60000) {
+    try {
+      const res = await api({ action: 'questions' });
+      if (res && res.success && Array.isArray(res.questions)) { Q.items = res.questions; Q.at = Date.now(); }
+    } catch (e) { /* older receiver or offline: the card just stays hidden */ }
+  }
+  renderQuestions();
+}
+function renderQuestions() {
+  const el = $('questions');
+  if (!el) return;
+  const done = LS.get('qAnswered', {});
+  const list = Q.items.filter((q) => q && q.id && !done[q.id] && Array.isArray(q.options) && q.options.length).slice(0, 3);
+  el.hidden = !list.length;
+  el.innerHTML = !list.length ? '' : '<h2 class="task-tier">Quick questions</h2>' + list.map((q) =>
+    '<div class="q-item"><p class="q-text">' + esc(q.question) + '</p><div class="q-btns">' +
+    q.options.map((o) => '<button type="button" class="moment-btn" data-qid="' + esc(q.id) + '" data-qopt="' + esc(o) + '">' + esc(o) + '</button>').join('') +
+    '</div></div>').join('') + '<p class="small">A tap goes to the inbox. For longer answers, use a sort session.</p>';
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-qid]');
+  if (!b) return;
+  const id = b.dataset.qid, opt = b.dataset.qopt;
+  queueInbox('Answer ' + id + ': ' + opt, 'questions');
+  inboxFlush(true);
+  const done = LS.get('qAnswered', {}); done[id] = Date.now();
+  Object.keys(done).forEach((k) => { if (Date.now() - done[k] > 30 * 86400000) delete done[k]; });
+  LS.set('qAnswered', done);
+  renderQuestions();
+  toast('Answered: ' + opt);
+});
 async function loadDay(clear) {
   const request = ++T.req;
   const choice = T.choice;
@@ -2000,6 +2047,7 @@ async function loadDay(clear) {
     message('');
     checkTomorrow();
     loadCarryOver();
+    if (choice === null || choice === 'today') loadQuestions(false);
   } catch (e) {
     if (request !== T.req) return;
     $('previous-day').disabled = !T.loadedDate; $('next-day').disabled = !T.loadedDate;
