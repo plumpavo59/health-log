@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v89 · 18 Nov';
+const APP_VERSION = 'v90 · 18 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -2218,6 +2218,7 @@ async function loadCarryOver() {
    getCarryOver (Optional-tasks v76); without them the list is one block in the plan's order, as before. */
 const taskPrio = (t) => Number(t.priority || (T.prio && T.prio[t.id]) || 1);
 const isTop = (t) => taskPrio(t) === 4;
+const THEN_MAX = 5;
 function renderTasks() {
   $('focus').replaceChildren(); $('extra').replaceChildren();
   const all = T.tasks.concat(carriedTasks());
@@ -2233,10 +2234,20 @@ function renderTasks() {
     core = core.filter((t) => top.indexOf(t) < 0);
     if (core.length) $('focus').appendChild(head('Then'));
   }
+  // v90 (Ru, 18 Nov): "Then" shows at most 5. Anything more waits under "If there's time" as "Also due", so a pile of
+  // overdue tasks never floods the day. The nightly plan (Brief 11, Daily load) also spreads them over the next days.
+  const overflow = T.manual ? [] : core.slice(THEN_MAX);
+  if (!T.manual) core = core.slice(0, THEN_MAX);
   core.forEach((t) => $('focus').appendChild(taskRow(t)));
+  if (overflow.length) {
+    const h = document.createElement('h2'); h.className = 'task-tier'; h.textContent = 'Also due (' + overflow.length + ')';
+    $('extra').appendChild(h);
+    overflow.forEach((t) => $('extra').appendChild(taskRow(t)));
+    if (extra.length) { const h2 = document.createElement('h2'); h2.className = 'task-tier'; h2.textContent = 'Optional'; $('extra').appendChild(h2); }
+  }
   extra.forEach((t) => $('extra').appendChild(taskRow(t)));
   if (!core.length && !top.length) $('focus').textContent = 'Nothing selected for this day.';
-  if (!extra.length) $('extra').textContent = 'Nothing extra today.';
+  if (!extra.length && !overflow.length) $('extra').textContent = 'Nothing extra today.';
 }
 
 setInterval(() => {
