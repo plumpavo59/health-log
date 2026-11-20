@@ -809,3 +809,12 @@ html.share-mode .eyebrow{visibility:hidden}
 .upkeep-k{font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .upkeep-v{flex:1;font-size:15px;line-height:1.35}
 .upkeep svg{color:var(--muted);flex:none}
+/* v93: Today = Priority, Important, Tomorrow; other tasks folded. Sort tab. */
+.tv .tomorrow{margin:6px 0 4px}
+.tm-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.tm-list li{display:grid;grid-template-columns:5.5rem 1fr;gap:10px;align-items:baseline;color:var(--text2);font-size:.95rem}
+.tm-time{font-variant-numeric:tabular-nums;font-size:.85rem;color:var(--muted)}
+.tm-flag{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.04em;border:1px solid currentColor;border-radius:6px;padding:0 5px}
+.calm{text-align:center;margin:10px 0}
+.tv .notes-panel{font-size:.95rem}
+#sort-view .upkeep{margin-top:18px}

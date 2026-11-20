@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v92 · 20 Nov';
+const APP_VERSION = 'v93 · 20 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -132,7 +132,9 @@ function defaultDeviceName() {
 
 /* ================= views ================= */
 /* Tabs on this device (Settings): e.g. only Today and Ahead on the e-ink tablet. Hidden tabs never load. */
-const ALL_TABS = [['today', 'Today'], ['ahead', 'Ahead'], ['money', 'Money'], ['trends', 'Health'], ['log', 'Log']];
+const ALL_TABS = [['today', 'Today'], ['ahead', 'Ahead'], ['sort', 'Sort'], ['money', 'Money'], ['trends', 'Health'], ['log', 'Log']];
+// v93: Sort is a new tab; a device that already picked its tabs gets it added once (it can be switched off in Settings).
+try { const t = JSON.parse(localStorage.getItem('hl.tabs') || 'null'); if (Array.isArray(t) && !t.includes('sort') && !localStorage.getItem('hl.sortTabAdded')) { t.splice(Math.min(2, t.length), 0, 'sort'); localStorage.setItem('hl.tabs', JSON.stringify(t)); } localStorage.setItem('hl.sortTabAdded', '1'); } catch (e) {}
 const tabsOn = () => { if (SHARE_ID) return ['trends']; const t = LS.get('tabs', null); const ok = Array.isArray(t) ? t.filter((x) => ALL_TABS.some(([k]) => k === x)) : []; return ok.length ? ok : ALL_TABS.map(([k]) => k); };
 const tabOn = (v) => tabsOn().includes(v);
 function applyTabs() { document.querySelectorAll('#tabbar [data-tab]').forEach((b) => { b.hidden = !tabOn(b.dataset.tab); }); }
@@ -147,11 +149,12 @@ function showView(v) {
   if (v !== 'trends') TR.pop = null;
   document.body.classList.remove('sheet-open');
   if (v !== 'settings') lastMainView = v;
-  ['today', 'ahead', 'money', 'trends', 'log', 'settings'].forEach((name) => { const el = $(name + '-view'); if (el) el.hidden = name !== v; });
+  ['today', 'ahead', 'sort', 'money', 'trends', 'log', 'settings'].forEach((name) => { const el = $(name + '-view'); if (el) el.hidden = name !== v; });
   $('tabbar').hidden = v === 'settings';
   document.querySelectorAll('#tabbar [data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === v ? 'page' : 'false'));
   if (v === 'today') todayEnter();
   else if (v === 'ahead') aheadEnter();
+  else if (v === 'sort') sortEnter();
   else if (v === 'money') moneyEnter();
   else if (v === 'log') { logRender(); logMoreRender(); }
   else if (v === 'trends') trendsEnter();
@@ -1940,7 +1943,7 @@ function todayMarkup() {
       '<button id="next-day" type="button" aria-label="Next day" disabled>›</button></div>' +
       '<p class="muted" id="date">&nbsp;</p><button id="back-to-today" type="button" hidden>Back to today</button>' +
       '<div class="stale" id="stale"></div>' +
-      '<button type="button" id="tomorrow-ready" class="tomorrow-ready" hidden>Tomorrow’s plan is ready ›</button></div>' +
+      '</div>' +
     '<div id="pair-prompt" class="notice pair-prompt" hidden>Pair this device once to see your day here. It takes a code from the Ru - Inbox Receiver script on your Mac.' +
       '<button type="button" class="log wide" id="pair-today">Pair this device</button></div>' +
     '<div id="today-body">' +
@@ -1948,11 +1951,10 @@ function todayMarkup() {
     '<div id="extras-status" class="status" role="status" aria-live="polite"></div>' +
     '<section id="day-notes" class="notes-panel" aria-label="Day notes" hidden></section>' +
     '<section id="day-calendar" aria-label="Calendar and plan" hidden></section>' +
-    '<a id="upkeep" class="upkeep" target="_blank" rel="noopener" hidden></a>' +
-    '<section id="questions" class="questions" aria-label="Quick questions" hidden></section>' +
     '<section id="today-tasks" class="task-list" aria-label="Tasks"><div id="focus"></div></section>' +
-    '<section class="optional-section"><button id="toggle" type="button" aria-expanded="false" aria-controls="optional">If there’s time</button>' +
-      '<div id="optional" hidden><h2 class="task-tier">If there’s time</h2><div id="extra"></div></div></section>' +
+    '<section id="tomorrow" class="tomorrow" aria-label="Tomorrow" hidden></section>' +
+    '<section class="optional-section"><button id="toggle" type="button" aria-expanded="false" aria-controls="optional">Other tasks</button>' +
+      '<div id="optional" hidden><div id="extra"></div></div></section>' +
     '<section id="logging" class="lower-section" aria-label="Inbox"><form id="log-form">' +
       '<textarea id="log-text" aria-label="Add something to your inbox" rows="2" maxlength="20000" placeholder="Add to inbox…"></textarea>' +
       '<div class="logging-actions"><button id="save-log" type="submit">Add to inbox</button></div>' +
@@ -1973,7 +1975,7 @@ function buildToday() {
   $('toggle').onclick = () => {
     const showing = $('optional').hidden;
     $('optional').hidden = !showing;
-    $('toggle').textContent = showing ? 'Hide' : 'If there’s time';
+    $('toggle').textContent = showing ? 'Hide other tasks' : otherLabel();
     $('toggle').setAttribute('aria-expanded', String(showing));
   };
   $('toggle-logs').onclick = () => {
@@ -1982,7 +1984,6 @@ function buildToday() {
     $('toggle-logs').setAttribute('aria-expanded', String(open));
     if (open) loadRecentLogs();
   };
-  $('tomorrow-ready').onclick = () => browseDay(1);
   $('log-form').onsubmit = saveInbox;
   $('previous-day').onclick = () => browseDay(-1);
   $('next-day').onclick = () => browseDay(1);
@@ -2003,7 +2004,7 @@ function todayEnter() {
   $('today-body').hidden = !paired;
   if (!paired) { $('date').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }); return; }
   if (!T.loadedDate || Date.now() - T.lastLoad > 120000) loadDay(false);
-  else checkTomorrow();
+  else loadTomorrow();
   renderInboxQueue(); inboxFlush();
 }
 
@@ -2057,8 +2058,22 @@ async function loadUpkeep(force) {
   } catch (e) { /* offline or older receiver */ }
   renderUpkeep();
 }
+function sortEnter() {
+  const v = $('sort-view');
+  if (!v) return;
+  if (!v.dataset.built) {
+    v.innerHTML = '<div class="top"><span class="eyebrow">LIFE HQ</span></div><div class="day-head"><h1>Sort</h1><p class="muted">Upkeep, whenever you feel like sorting.</p></div>' +
+      '<a id="upkeep" class="upkeep" target="_blank" rel="noopener" hidden></a>' +
+      '<p id="sort-empty" class="muted calm" hidden>Sort’s summary shows here once the receiver has Api.gs v91.</p>' +
+      '<section id="questions" class="questions" aria-label="Quick questions" hidden></section>';
+    v.dataset.built = '1';
+  }
+  if (!Conn.paired()) { $('sort-empty').hidden = false; $('sort-empty').textContent = 'Pair this device in Settings to see Sort here.'; return; }
+  loadUpkeep(false); loadQuestions(false);
+}
 function renderUpkeep() {
   const el = $('upkeep');
+  if ($('sort-empty')) $('sort-empty').hidden = !!(UP.data && UP.data.url);
   if (!el) return;
   const u = UP.data;
   const ok = u && /^https:\/\/script\.google\.com\//.test(String(u.url || ''));
@@ -2069,7 +2084,7 @@ function renderUpkeep() {
   if (old) parts.push(old + ' to clear out');
   const built = String(u.builtAt || ''), stale = built && built.slice(0, 10) !== healthKey(new Date());
   el.href = u.url;
-  el.innerHTML = '<span class="upkeep-k">Upkeep</span><span class="upkeep-v">' + esc(parts.join(' · ')) +
+  el.innerHTML = '<span class="upkeep-k">Open Sort</span><span class="upkeep-v">' + esc(parts.join(' · ')) +
     (stale ? ' <span class="small">(as of ' + esc(built.slice(5, 10).split('-').reverse().join('/')) + ')</span>' : '') +
     '</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
   el.setAttribute('aria-label', 'Upkeep: ' + parts.join(', ') + '. Opens Sort.');
@@ -2135,9 +2150,8 @@ async function loadDay(clear) {
     if (usesCache && !res.manualSelection) LS.set('cache.day', { at: Date.now(), result: res });
     $('stale').textContent = '';
     message('');
-    checkTomorrow();
     loadCarryOver();
-    if (choice === null || choice === 'today') { loadQuestions(false); loadUpkeep(false); }
+    loadTomorrow();
   } catch (e) {
     if (request !== T.req) return;
     $('previous-day').disabled = !T.loadedDate; $('next-day').disabled = !T.loadedDate;
@@ -2161,11 +2175,15 @@ function renderDay(res) {
   $('previous-day').disabled = false; $('next-day').disabled = false;
   T.tasks = res.tasks || [];
   renderTasks();
+  // v93 (Ru, 20 Nov): no suggested schedule and no advice box. The box keeps only Ru's own lines and at most two
+  // untimed bullets (the nightly plan now writes 0-2 heads-ups, e.g. weather; Brief 11). Timed bullets are dropped.
   const plan = splitTimedPlanNotes(res.notes);
-  $('day-notes').textContent = plan.notes.replace(/^\s+|\s+$/g, '');
-  $('day-notes').hidden = !plan.notes.trim() || Boolean(res.notesError);
+  const lines = plan.notes.split(/\r\n|\n|\r/).map((l) => l.trim()).filter(Boolean);
+  const own = lines.filter((l) => !/^•/.test(l)), heads = lines.filter((l) => /^•/.test(l)).slice(0, 2);
+  $('day-notes').textContent = own.concat(heads).join('\n');
+  $('day-notes').hidden = !(own.length || heads.length) || Boolean(res.notesError);
   $('extras-status').textContent = res.notesError || '';
-  renderDayCalendar(res.calendar || [], res.calendarError || '', res.notesError ? [] : plan.suggestions);
+  renderDayCalendar(res.calendar || [], res.calendarError || '', []);
   if (res.tasksError) $('focus').textContent = res.tasksError;
 }
 
@@ -2303,41 +2321,58 @@ async function loadCarryOver() {
   } catch (e) {}
 }
 
-/* v76/v78: "Priority" = tasks with Todoist's red flag (P1; priority 4 in Todoist's data), however many; then the
-   rest ("Then"), P2 above P3 above unflagged; optional ones fold under "If there's time". Priorities come with
-   getCarryOver (Optional-tasks v76); without them the list is one block in the plan's order, as before. */
+/* v93 (Ru, 20 Nov: "I can't clearly see what important projects I have to do today and tomorrow"):
+   Priority = Todoist P1 (red flag; priority 4 in Todoist's data), Important = P2 and P3 (P2 first), and everything
+   else, optional or not, folds under "Other tasks (n)". Priorities come with getDashboardDay and getCarryOver. */
 const taskPrio = (t) => Number(t.priority || (T.prio && T.prio[t.id]) || 1);
 const isTop = (t) => taskPrio(t) === 4;
-const THEN_MAX = 5;
+const otherLabel = () => 'Other tasks' + (T.otherN ? ' (' + T.otherN + ')' : '');
 function renderTasks() {
   $('focus').replaceChildren(); $('extra').replaceChildren();
   const all = T.tasks.concat(carriedTasks());
-  // A red flag wins over the optional label: a P1 task shows under Priority even if it's labelled optional.
-  const top = T.manual ? [] : all.filter(isTop);
-  let core = all.filter((t) => !t.optional || top.indexOf(t) >= 0);
-  const extra = all.filter((t) => t.optional && top.indexOf(t) < 0);
-  if (!T.manual) core = core.map((t, i) => [t, i]).sort((a, b) => taskPrio(b[0]) - taskPrio(a[0]) || a[1] - b[1]).map((x) => x[0]);
-  if (top.length) {
-    const head = (txt) => { const h = document.createElement('h2'); h.className = 'task-tier'; h.textContent = txt; return h; };
-    $('focus').appendChild(head('Priority'));
-    top.forEach((t) => $('focus').appendChild(taskRow(t)));
-    core = core.filter((t) => top.indexOf(t) < 0);
-    if (core.length) $('focus').appendChild(head('Then'));
-  }
-  // v90 (Ru, 18 Nov): "Then" shows at most 5. Anything more waits under "If there's time" as "Also due", so a pile of
-  // overdue tasks never floods the day. The nightly plan (Brief 11, Daily load) also spreads them over the next days.
-  const overflow = T.manual ? [] : core.slice(THEN_MAX);
-  if (!T.manual) core = core.slice(0, THEN_MAX);
-  core.forEach((t) => $('focus').appendChild(taskRow(t)));
-  if (overflow.length) {
-    const h = document.createElement('h2'); h.className = 'task-tier'; h.textContent = 'Also due (' + overflow.length + ')';
-    $('extra').appendChild(h);
-    overflow.forEach((t) => $('extra').appendChild(taskRow(t)));
-    if (extra.length) { const h2 = document.createElement('h2'); h2.className = 'task-tier'; h2.textContent = 'Optional'; $('extra').appendChild(h2); }
-  }
-  extra.forEach((t) => $('extra').appendChild(taskRow(t)));
-  if (!core.length && !top.length) $('focus').textContent = 'Nothing selected for this day.';
-  if (!extra.length && !overflow.length) $('extra').textContent = 'Nothing extra today.';
+  const head = (txt) => { const h = document.createElement('h2'); h.className = 'task-tier'; h.textContent = txt; return h; };
+  const byPrio = (list) => list.map((t, i) => [t, i]).sort((a, b) => taskPrio(b[0]) - taskPrio(a[0]) || a[1] - b[1]).map((x) => x[0]);
+  const top = all.filter(isTop), important = byPrio(all.filter((t) => taskPrio(t) === 3 || taskPrio(t) === 2));
+  const other = all.filter((t) => taskPrio(t) < 2);
+  if (top.length) { $('focus').appendChild(head('Priority')); top.forEach((t) => $('focus').appendChild(taskRow(t))); }
+  if (important.length) { $('focus').appendChild(head('Important')); important.forEach((t) => $('focus').appendChild(taskRow(t))); }
+  if (!top.length && !important.length) { const p = document.createElement('p'); p.className = 'muted calm'; p.textContent = other.length ? 'Nothing flagged for today.' : 'Nothing selected for this day.'; $('focus').appendChild(p); }
+  other.forEach((t) => $('extra').appendChild(taskRow(t)));
+  T.otherN = other.length;
+  const tg = $('toggle');
+  if (tg) { tg.hidden = !other.length; if ($('optional').hidden) tg.textContent = otherLabel(); }
+}
+
+/* v93: Tomorrow, under today's tasks: its calendar and its P1-P3 tasks, nothing else. One getDashboardDay call for
+   tomorrow, kept for 30 minutes. Only on the normal Today view. */
+async function loadTomorrow() {
+  const el = $('tomorrow');
+  if (!el || !Conn.paired()) return;
+  const working = londonWorkingDay(T.rolloverMinutes);
+  if (T.manual || T.loadedDate !== working) { el.hidden = true; return; }
+  const tomorrow = shiftDay(working, 1);
+  const saved = LS.get('cache.tomorrow', null);
+  const fresh = saved && saved.result && saved.result.date === tomorrow;
+  if (fresh) renderTomorrow(saved.result);
+  if (fresh && Date.now() - saved.at < 30 * 60000) return;
+  try {
+    const result = await dash('getDashboardDay', [tomorrow]);
+    LS.set('cache.tomorrow', { at: Date.now(), result });
+    if (T.loadedDate === working && !T.manual) renderTomorrow(result);
+  } catch (e) {}
+}
+function renderTomorrow(res) {
+  const el = $('tomorrow');
+  if (!el) return;
+  const ev = (res.calendar || []).filter((e) => e && e.title);
+  const tasks = (res.tasks || []).filter((t) => taskPrio(t) >= 2).map((t, i) => [t, i]).sort((a, b) => taskPrio(b[0]) - taskPrio(a[0]) || a[1] - b[1]).map((x) => x[0]);
+  const flag = (t) => (taskPrio(t) === 4 ? '<span class="tm-flag" aria-label="Priority">P1</span>' : '');
+  el.innerHTML = '<h2 class="task-tier">Tomorrow</h2>' +
+    (ev.length || tasks.length ? '<ul class="tm-list">' +
+      ev.map((e) => '<li><span class="tm-time">' + esc(String(e.time || '').replace(/\s*–\s*/, '–')) + '</span><span>' + esc(e.title) + '</span></li>').join('') +
+      tasks.map((t) => '<li><span class="tm-time">' + flag(t) + '</span><span>' + esc(t.name) + '</span></li>').join('') + '</ul>'
+      : '<p class="muted calm">Nothing fixed or flagged.</p>');
+  el.hidden = false;
 }
 
 setInterval(() => {
@@ -2421,27 +2456,6 @@ async function inboxFlush(manual) {
 }
 
 /* Tomorrow's plan: from 22:15 until the 00:40 rollover, check whether the nightly plan has been written. */
-async function checkTomorrow() {
-  const btn = $('tomorrow-ready');
-  if (!btn || !Conn.paired()) return;
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-    .formatToParts(new Date()).map((p) => [p.type, p.value]));
-  const mins = Number(parts.hour) * 60 + Number(parts.minute);
-  const evening = window.HQ_FORCE_EVENING || mins >= 22 * 60 + 15 || mins < T.rolloverMinutes;
-  const working = londonWorkingDay(T.rolloverMinutes);
-  const onToday = T.loadedDate === working && !T.manual;
-  const tomorrow = shiftDay(working, 1);
-  const saved = LS.get('cache.tomorrow', null);
-  const ready = (r) => r && r.result && r.result.date === tomorrow && /^\s*•\s/m.test(String(r.result.notes || ''));
-  btn.hidden = !(evening && onToday && ready(saved));
-  if (!evening || !onToday || ready(saved) || (saved && saved.result && saved.result.date === tomorrow && Date.now() - saved.at < 10 * 60000)) return;
-  try {
-    const result = await dash('getDashboardDay', [tomorrow]);
-    LS.set('cache.tomorrow', { at: Date.now(), result });
-    btn.hidden = !(ready({ result }) && T.loadedDate === working && !T.manual);
-  } catch (e) {}
-}
-
 /* ---------- bottom panels ---------- */
 function showPanelLoading(panel, text) {
   const loading = document.createElement('span');
@@ -4293,10 +4307,10 @@ document.addEventListener('visibilitychange', () => {
   logFlush();
   if (view === 'log') logRenderSoft();
   // v77: coming back to the app refreshes the health data whichever tab is showing (at most once a minute).
-  if (Conn.canLog() && (tabOn('log') || tabOn('trends')) && Date.now() - (cfg.at || 0) > 60000) logRefreshConfig();
+  if (Conn.canLog() && (view === 'log' || view === 'trends') && Date.now() - (cfg.at || 0) > 60000) logRefreshConfig();  // v93: only where it's shown
   inboxFlush();
   // (hidden tabs are never the current view, so nothing below loads for them)
-  if ((view === 'ahead' || view === 'money') && Conn.paired()) showView(view);
+  if ((view === 'ahead' || view === 'money' || view === 'sort') && Conn.paired()) showView(view);
   if (view === 'trends') trendsEnter();
   if (view === 'today' && Conn.paired()) {
     if (T.loadedDate && !T.manual && londonWorkingDay(T.rolloverMinutes) !== T.loadedDate) { T.choice = null; loadDay(true); }
@@ -4311,7 +4325,12 @@ setInterval(() => {
 
 applyTabs();
 showView(openTab());
-if (Conn.canLog() && (tabOn('log') || tabOn('trends'))) { logFlush(); logRefreshConfig(); }
+// v93: the health data is the heaviest call. When the app opens on Today, Ahead, Sort or Money it waits a few seconds
+// so the day loads first; Log and Health still load it straight away.
+if (Conn.canLog() && (tabOn('log') || tabOn('trends'))) {
+  logFlush();
+  if (view === 'log' || view === 'trends') logRefreshConfig(); else setTimeout(() => { if (Date.now() - (cfg.at || 0) > 60000) logRefreshConfig(); }, 6000);
+}
 
 if ('serviceWorker' in navigator) {
   let reloaded = false;
