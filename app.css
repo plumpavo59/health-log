@@ -803,3 +803,9 @@ html.share-mode .eyebrow{visibility:hidden}
 .q-text{margin:0;font-size:15px;line-height:1.35}
 .q-btns{display:flex;flex-wrap:wrap;gap:6px}
 .q-btns .moment-btn{flex:0 1 auto}
+/* v91: Upkeep line on Today (opens Ru - Sort) */
+.upkeep{display:flex;align-items:center;gap:10px;margin:4px 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);text-decoration:none;min-height:44px}
+.upkeep[hidden]{display:none}
+.upkeep-k{font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.upkeep-v{flex:1;font-size:15px;line-height:1.35}
+.upkeep svg{color:var(--muted);flex:none}

@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v90 · 18 Nov';
+const APP_VERSION = 'v91 · 20 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -1890,6 +1890,7 @@ function todayMarkup() {
     '<div id="extras-status" class="status" role="status" aria-live="polite"></div>' +
     '<section id="day-notes" class="notes-panel" aria-label="Day notes" hidden></section>' +
     '<section id="day-calendar" aria-label="Calendar and plan" hidden></section>' +
+    '<a id="upkeep" class="upkeep" target="_blank" rel="noopener" hidden></a>' +
     '<section id="questions" class="questions" aria-label="Quick questions" hidden></section>' +
     '<section id="today-tasks" class="task-list" aria-label="Tasks"><div id="focus"></div></section>' +
     '<section class="optional-section"><button id="toggle" type="button" aria-expanded="false" aria-controls="optional">If there’s time</button>' +
@@ -1984,6 +1985,37 @@ function stampTime(ms) { const d = new Date(ms); return (dayKey(d) === dayKey(ne
 /* v89 (B1, 18 Nov): up to 3 open questions from Life HQ › Questions, answered with one tap. A tap sends
    "Answer Q-…: <option>" to the inbox (same queue as Add to inbox, so it works offline); the inbox run applies it
    and marks the question Answered. Answered ones are hidden here straight away. Needs receiver v89 ("questions"). */
+/* v91 (Ru, 20 Nov): one "Upkeep" line on Today from Ru - Sort's summary (Life HQ › Sort!C1, rebuilt hourly by Sort),
+   e.g. "Upkeep · 68 to sort, about 33 min · 59 to clear out". Tapping it opens Sort. Needs receiver Api.gs v91
+   ("upkeep"); with an older receiver the line just stays hidden. The last copy is kept so it shows at once. */
+const UP = { data: LS.get('upkeep', null), at: 0 };
+async function loadUpkeep(force) {
+  if (!Conn.paired() || SHARE_ID) return;
+  renderUpkeep();
+  if (!force && Date.now() - UP.at < 10 * 60000) return;
+  try {
+    const res = await api({ action: 'upkeep' });
+    if (res && res.success) { UP.data = res.upkeep || null; UP.at = Date.now(); LS.set('upkeep', UP.data); }
+  } catch (e) { /* offline or older receiver */ }
+  renderUpkeep();
+}
+function renderUpkeep() {
+  const el = $('upkeep');
+  if (!el) return;
+  const u = UP.data;
+  const ok = u && /^https:\/\/script\.google\.com\//.test(String(u.url || ''));
+  el.hidden = !ok;
+  if (!ok) { el.textContent = ''; return; }
+  const n = Number(u.today) || 0, min = Number(u.minutes) || 0, old = Number(u.clearOut) || 0;
+  const parts = [n ? n + ' to sort' + (min ? ', about ' + min + ' min' : '') : 'Nothing waiting today'];
+  if (old) parts.push(old + ' to clear out');
+  const built = String(u.builtAt || ''), stale = built && built.slice(0, 10) !== healthKey(new Date());
+  el.href = u.url;
+  el.innerHTML = '<span class="upkeep-k">Upkeep</span><span class="upkeep-v">' + esc(parts.join(' · ')) +
+    (stale ? ' <span class="small">(as of ' + esc(built.slice(5, 10).split('-').reverse().join('/')) + ')</span>' : '') +
+    '</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+  el.setAttribute('aria-label', 'Upkeep: ' + parts.join(', ') + '. Opens Sort.');
+}
 const Q = { items: [], at: 0 };
 async function loadQuestions(force) {
   if (!Conn.paired() || SHARE_ID) return;
@@ -2047,7 +2079,7 @@ async function loadDay(clear) {
     message('');
     checkTomorrow();
     loadCarryOver();
-    if (choice === null || choice === 'today') loadQuestions(false);
+    if (choice === null || choice === 'today') { loadQuestions(false); loadUpkeep(false); }
   } catch (e) {
     if (request !== T.req) return;
     $('previous-day').disabled = !T.loadedDate; $('next-day').disabled = !T.loadedDate;
