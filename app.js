@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v93 · 20 Nov';
+const APP_VERSION = 'v94 · 20 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -156,7 +156,7 @@ function showView(v) {
   else if (v === 'ahead') aheadEnter();
   else if (v === 'sort') sortEnter();
   else if (v === 'money') moneyEnter();
-  else if (v === 'log') { logRender(); logMoreRender(); }
+  else if (v === 'log') { logRender(); logMoreRender(); if (Conn.canLog() && Date.now() - (cfg.at || 0) > 60000) logRefreshConfig(); }  // v94: health data loads when Log opens
   else if (v === 'trends') trendsEnter();
   else settingsRender();
 }
@@ -750,29 +750,41 @@ const uprightToday = () => !!(cfg.today && cfg.today.upright) ||
    "Last night" shows Bed and Up in the morning (04:00–15:00) until both are logged, and Sleep (quality, disturbed,
    on waking) at any time of the health day until it's rated. "Tonight" shows Stress from 19:30 until it's logged
    (Ru: not before about 7:30pm) and Into bed from 21:00. */
-const sleepRatedToday = () => !!(cfg.today && cfg.today.sleepRated) ||
-  recent.some((r) => r.hday === healthKey(new Date()) && r.sleepRate && r.status !== 'failed');
-const stressToday = () => !!(cfg.today && cfg.today.stressDone) ||
-  recent.some((r) => r.hday === healthKey(new Date()) && r.stressLog && r.status !== 'failed');
+/* v94 (Ru, 20 Nov: "I thought I already rated when I woke up"; the pill rows were clunky): what's already logged
+   comes from the tracker's own day summary (any rating this health day, from the app, a chat or the inbox), plus
+   receiver v92's flags, plus anything just logged here. */
+function symDay(k) {
+  const sy = cfg.symptoms;
+  if (!sy || !Array.isArray(sy.days) || !sy.startKey) return null;
+  const i = dayNum(sy.startKey, k) - 1;
+  return i >= 0 ? sy.days[i] || null : null;
+}
+const sleepRatedToday = () => {
+  const K = healthKey(new Date()), d = symDay(K);
+  return !!(cfg.today && cfg.today.sleepRated) || !!(d && (typeof d.q === 'number' || typeof d.z === 'number')) ||
+    recent.some((r) => r.hday === K && r.sleepRate && r.status !== 'failed');
+};
+const stressToday = () => {
+  const K = healthKey(new Date()), d = symDay(K);
+  return !!(cfg.today && cfg.today.stressDone) || !!(d && typeof symVal(d, 'x') === 'number') ||
+    recent.some((r) => r.hday === K && r.stressLog && r.status !== 'failed');
+};
+/* v94: only what's due right now, one plain row each, nothing once it's logged.
+   Morning (04:00-15:00): last night's Into bed and Out of bed taps if missing. Until 19:30: rate last night's sleep
+   if it isn't rated yet. From 19:30: today's stress. From 21:00: tonight's Into bed. */
 function sleepCardView() {
-  const m = sleepMarks(), n = m.night || {}, now = new Date(), h = now.getHours(), mins = h * 60 + now.getMinutes();
-  const pill = (k, label) => '<button type="button" class="sleep-pill' + (m[k] ? ' done' : '') + '" data-act="sleep-open" data-v="' + k + '">' +
-    esc(label) + ' <b>' + (m[k] ? esc(m[k].hm) : 'log') + '</b></button>';
-  const rated = sleepRatedToday(), morning = h >= 4 && h < 15;
-  let rows = '';
-  if ((morning && (!m.lastbed || !m.up)) || (h >= 4 && !rated)) {
-    rows += '<div class="sleep-strip" role="group" aria-label="Last night"><span class="sleep-h">Last night</span>' +
-      (morning && (!m.lastbed || !m.up) ? pill('lastbed', 'Bed') + pill('up', 'Up') : '') +
-      '<button type="button" class="sleep-pill' + (rated ? ' done' : '') + '" data-act="sleeprate-open">Sleep <b>' + (rated ? '✓' : 'rate') + '</b></button>' +
-      (typeof n.sl === 'number' ? '<span class="sleep-hrs">' + n.sl + ' h</span>' : '') + '</div>';
+  const m = sleepMarks(), now = new Date(), h = now.getHours(), mins = h * 60 + now.getMinutes();
+  const night = h < 4, rows = [];
+  const row = (act, v, label, verb) => rows.push('<button type="button" class="due-row" data-act="' + act + '"' + (v ? ' data-v="' + v + '"' : '') + '>' +
+    '<span>' + label + '</span><span class="due-act">' + verb + '</span></button>');
+  if (h >= 4 && h < 15) {
+    if (!m.lastbed) row('sleep-open', 'lastbed', 'When did you go to bed?', 'Log');
+    if (!m.up) row('sleep-open', 'up', 'When did you get up?', 'Log');
   }
-  const evening = mins >= 19 * 60 + 30 || h < 4, stressDue = evening && !stressToday(), bedDue = (h >= 21 || h < 4) && !m.bed;
-  if (stressDue || bedDue) {
-    rows += '<div class="sleep-strip" role="group" aria-label="Tonight"><span class="sleep-h">Tonight</span>' +
-      (stressDue ? '<button type="button" class="sleep-pill" data-act="stress-open">Stress today <b>log</b></button>' : '') +
-      (bedDue ? pill('bed', 'Into bed') : '') + '</div>';
-  }
-  return rows;
+  if (h >= 4 && mins < 19 * 60 + 30 && !sleepRatedToday()) row('sleeprate-open', '', 'How did you sleep?', 'Rate');
+  if ((mins >= 19 * 60 + 30 || night) && !stressToday()) row('stress-open', '', 'How stressful was today?', 'Rate');
+  if ((h >= 21 || night) && !m.bed) row('sleep-open', 'bed', 'Going to bed?', 'Log');
+  return rows.length ? '<div class="due-list" role="group" aria-label="To log now">' + rows.join('') + '</div>' : '';
 }
 /* v92: the window for last night's sleep, opened from the Last night row: quality, disturbed, the on-waking
    buttons and (ring off) the times. Saved as a Check-in with Period Wake and no symptom scores, as before. */

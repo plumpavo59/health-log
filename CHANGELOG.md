@@ -3,6 +3,11 @@
 Newest first. The version shows in Settings › About (APP_VERSION in app.js) and in the service worker cache name (sw.js).
 Older releases (v21–v88) are listed in Drive › _LIFE HQ › History › Life HQ history.
 
+## v94 · 20 Nov 2026 (Claude)
+- Log tab: the sleep and stress pills are replaced by plain "to log now" rows that only appear when due and vanish once done: in the morning bedtime and getting-up if missing; "How did you sleep?" until 19:30 if not rated; "How stressful was today?" from 19:30; "Going to bed?" from 21:00.
+- "Already rated" now comes from the tracker's own day data, so a rating made in the morning check-in (or by a chat) counts; no more blank "rate" prompt in the evening.
+- Opening the Log tab loads the health data if it's more than a minute old.
+
 ## v93 · 20 Nov 2026 (Claude)
 - Today is calmer (Ru: too much text, can't see what's important): calendar events only (no suggested schedule); the notes box keeps Ru's own lines and at most two heads-up bullets; tasks as **Priority** (P1) and **Important** (P2, P3), everything else folded under **Other tasks (n)**; a **Tomorrow** list with tomorrow's events and P1–P3 tasks.
 - New **Sort** tab: Sort's summary (opens Sort) and the Quick questions, moved off Today.

@@ -818,3 +818,9 @@ html.share-mode .eyebrow{visibility:hidden}
 .calm{text-align:center;margin:10px 0}
 .tv .notes-panel{font-size:.95rem}
 #sort-view .upkeep{margin-top:18px}
+/* v94: the "to log now" rows on the Log tab (replace the sleep pill strips) */
+.due-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:4px 0 12px}
+.due-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:52px;padding:10px 14px;background:var(--card);color:var(--ink);border:0;border-top:1px solid var(--line);font:inherit;font-size:16px;text-align:left}
+.due-row:first-child{border-top:0}
+.due-act{flex:none;font-weight:600;font-size:.9rem;padding:6px 14px;border-radius:999px;border:1.5px solid var(--ink)}
+.due-row:active .due-act{background:var(--ink);color:var(--on-ink)}
