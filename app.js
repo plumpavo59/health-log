@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v91 · 20 Nov';
+const APP_VERSION = 'v92 · 20 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -356,24 +356,33 @@ let sending = false;
 /* Wake check-ins come in two stages: in bed (Period Wake) and getting up (Period Getting up). */
 const wokeToday = () => !!(cfg.today && cfg.today.wakeAt) || recent.some((r) => r.hday === healthKey(new Date()) && r.wake && r.status !== 'failed');
 const upToday = () => !!(cfg.today && cfg.today.upAt) || recent.some((r) => r.hday === healthKey(new Date()) && r.up && r.status !== 'failed');
-function guessPeriod() {
-  const now = new Date(), h = now.getHours(), mins = h * 60 + now.getMinutes();
-  if (typeof sleepMarks === 'function' && sleepMarks().bed) return 'Bed';  // v74: "Into bed tonight" logged
-  if (mins >= 23 * 60 + 30 || h < 4) return 'Bed';
-  // v74: the first check-in before noon assumes he's still in bed, unless he's already out of bed or has done a
-  // check-in today that wasn't in bed; then later ones are day check-ins.
-  if (h < 12 && !upToday() && !uprightToday()) return 'Wake';
-  return 'Day';
-}
 const guessStage = () => (wokeToday() ? 'up' : 'bed');
+/* v92 (Ru, 20 Nov: "I check in either in bed or out of bed"): the check-in has one In bed switch instead of
+   Wake / Day / Bed. Its first guess comes from the sleep taps: in bed after tonight's Into bed, and in the morning
+   until Out of bed (or a check-in that wasn't in bed); late at night too. The tracker's Period still follows the
+   old meaning, worked out here: in bed before getting up today = Wake (in bed on waking), in bed otherwise = Bed,
+   out of bed = Day (the receiver turns that into Morning / Midday / Afternoon / Evening by the clock). */
+function guessInBed() {
+  const now = new Date(), h = now.getHours(), mins = h * 60 + now.getMinutes(), m = sleepMarks();
+  if (m.bed) return true;
+  if (m.up || upToday()) return mins >= 23 * 60 + 30 || h < 4;
+  if (h >= 4 && h < 15) return !uprightToday();
+  return mins >= 23 * 60 + 30 || h < 4;
+}
+const ciInBed = () => (typeof S.inBed === 'boolean' ? S.inBed : guessInBed());
+function ciPeriod() {
+  if (!ciInBed()) return 'Day';
+  const h = new Date().getHours(), m = sleepMarks();
+  return h >= 4 && h < 16 && !m.bed && !m.up && !upToday() ? 'Wake' : 'Bed';
+}
 
 const S = {
   suppOn: false, supps: [],
-  open: false, period: null, stage: null, scores: {}, checkNote: '', calMed: null, moment: [], momentNote: '',
+  open: false, period: null, stage: null, inBed: null, scores: {}, checkNote: '', calMed: null, moment: [], momentNote: '',
   bristol: null, size: null, urgent: false, bpain: '', bowelNote: '',
   meds: [], doses: {}, food: '', time: null, timeOpen: false,
   sheet: null, sheetFresh: false, refreshing: false, inboxText: '', inboxStatus: '', dirty: false,
-  sleepT: { bed: '', wake: '', up: '' }, wakeFlags: {}, watch: {},
+  sleepT: { bed: '', wake: '', up: '' }, wakeFlags: {}, watch: {}, rate: {},
   actText: '', actType: null, actMin: null, actEffort: null
 };
 const ACT_TYPES = ['Walk', 'Dance', 'Aerial', 'Cycle', 'Carrying/lifting', 'Other'];
@@ -733,52 +742,75 @@ function sleepSlotDate(slot, hhmm) {
 }
 const uprightToday = () => !!(cfg.today && cfg.today.upright) ||
   recent.some((r) => r.hday === healthKey(new Date()) && r.kind === 'checkin' && r.status !== 'failed' && r.period && !/^(Wake|Bed)$/.test(r.period));
-/* v77: one slim row under the quick buttons, only when it's useful: in the morning (04:00–15:00) until last
-   night's into-bed and this morning's out-of-bed are both logged, and in the evening (21:00–04:00) until tonight's
-   into-bed is logged. Logged times can still be changed from Logged today. */
+/* v77: one slim row under the quick buttons, only when it's useful.
+   v92 (Ru, 20 Nov: sleep quality and stress don't depend on the time of day, and aren't in the check-in any more):
+   "Last night" shows Bed and Up in the morning (04:00–15:00) until both are logged, and Sleep (quality, disturbed,
+   on waking) at any time of the health day until it's rated. "Tonight" shows Stress from 19:30 until it's logged
+   (Ru: not before about 7:30pm) and Into bed from 21:00. */
+const sleepRatedToday = () => !!(cfg.today && cfg.today.sleepRated) ||
+  recent.some((r) => r.hday === healthKey(new Date()) && r.sleepRate && r.status !== 'failed');
+const stressToday = () => !!(cfg.today && cfg.today.stressDone) ||
+  recent.some((r) => r.hday === healthKey(new Date()) && r.stressLog && r.status !== 'failed');
 function sleepCardView() {
-  const m = sleepMarks(), n = m.night || {}, h = new Date().getHours();
+  const m = sleepMarks(), n = m.night || {}, now = new Date(), h = now.getHours(), mins = h * 60 + now.getMinutes();
   const pill = (k, label) => '<button type="button" class="sleep-pill' + (m[k] ? ' done' : '') + '" data-act="sleep-open" data-v="' + k + '">' +
     esc(label) + ' <b>' + (m[k] ? esc(m[k].hm) : 'log') + '</b></button>';
-  let body = '';
-  if (h >= 4 && h < 15 && (!m.lastbed || !m.up)) {
-    body = '<span class="sleep-h">Last night</span>' + pill('lastbed', 'Bed') + pill('up', 'Up') +
-      (typeof n.sl === 'number' ? '<span class="sleep-hrs">' + n.sl + ' h</span>' : '');
-  } else if ((h >= 21 || h < 4) && !m.bed) {
-    body = '<span class="sleep-h">Tonight</span>' + pill('bed', 'Into bed');
+  const rated = sleepRatedToday(), morning = h >= 4 && h < 15;
+  let rows = '';
+  if ((morning && (!m.lastbed || !m.up)) || (h >= 4 && !rated)) {
+    rows += '<div class="sleep-strip" role="group" aria-label="Last night"><span class="sleep-h">Last night</span>' +
+      (morning && (!m.lastbed || !m.up) ? pill('lastbed', 'Bed') + pill('up', 'Up') : '') +
+      '<button type="button" class="sleep-pill' + (rated ? ' done' : '') + '" data-act="sleeprate-open">Sleep <b>' + (rated ? '✓' : 'rate') + '</b></button>' +
+      (typeof n.sl === 'number' ? '<span class="sleep-hrs">' + n.sl + ' h</span>' : '') + '</div>';
   }
-  return body ? '<div class="sleep-strip" role="group" aria-label="Sleep times">' + body + '</div>' : '';
+  const evening = mins >= 19 * 60 + 30 || h < 4, stressDue = evening && !stressToday(), bedDue = (h >= 21 || h < 4) && !m.bed;
+  if (stressDue || bedDue) {
+    rows += '<div class="sleep-strip" role="group" aria-label="Tonight"><span class="sleep-h">Tonight</span>' +
+      (stressDue ? '<button type="button" class="sleep-pill" data-act="stress-open">Stress today <b>log</b></button>' : '') +
+      (bedDue ? pill('bed', 'Into bed') : '') + '</div>';
+  }
+  return rows;
 }
-/* v89 (dashboard backlog 15 + 17 Nov): sleep quality is asked on a Wake "In bed" check-in as before, and also on
-   the first check-in of the health day whatever its period, so a morning that starts with "Getting up" or a Day
-   check-in still gets last night's sleep. */
-const firstCheckinToday = () => !(cfg.today && cfg.today.lastCheckin);
-const sleepAsked = (period, stage) => (period === 'Wake' && stage === 'bed') || firstCheckinToday();
+/* v92: the window for last night's sleep, opened from the Last night row: quality, disturbed, the on-waking
+   buttons and (ring off) the times. Saved as a Check-in with Period Wake and no symptom scores, as before. */
+function rateSlider(k, l, max) {
+  const v = S.rate[k], set = v !== undefined;
+  return '<div class="scale"><label for="rr-' + k + '">' + l + '</label>' +
+    '<input id="rr-' + k + '" type="range" min="0" max="' + max + '" step="0.5" value="' + (set ? v : max / 2) + '" data-rate="' + k + '"' + (set ? '' : ' class="unset"') + '>' +
+    '<output id="or-' + k + '" for="rr-' + k + '"' + (set ? '' : ' class="unset"') + '>' + (set ? v : '–') + '</output></div>';
+}
+function sleepRateBody() {
+  const keys = [['bed', 'Went to sleep'], ['wake', 'Woke']];
+  return rateSlider('sleepq', 'Sleep quality', 10) + rateSlider('disturb', 'Sleep disturbed', 5) +
+    '<div class="opt-h">On waking</div><div class="wake-flags" role="group" aria-label="On waking">' + WAKE_FLAGS.map(([k, l]) => '<button type="button" class="moment-btn" data-act="wake-flag" data-v="' + k + '" aria-pressed="' + !!S.wakeFlags[k] + '">' + l + '</button>').join('') + '</div>' +
+    (S.ringOff ? '<div class="sleep-times" role="group" aria-label="Sleep times">' + keys.map(([k, l]) =>
+      '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') + '</div>' : '') +
+    '<button type="button" class="link-btn ring-off" data-act="ring-off">' + (S.ringOff ? 'Hide sleep times' : 'Ring off? Add sleep times') + '</button>' +
+    '<p class="small">About last night, whenever you log it. Bed and up times are the taps on the Last night row.</p>';
+}
+const rateCount = () => ['sleepq', 'disturb'].filter((k) => S.rate[k] !== undefined).length + WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).length +
+  ['bed', 'wake'].filter((k) => /^\d{2}:\d{2}$/.test(S.sleepT[k] || '')).length;
+function updateRateButton() {
+  const b = $('rate-save'); if (!b) return;
+  if (S.sheet === 'stress') { b.disabled = S.rate.stress === undefined; return; }
+  b.disabled = !rateCount();
+}
 function checkinView() {
-  const period = S.period || guessPeriod();
   const last = cfg.today.lastCheckin ? 'Last: ' + cfg.today.lastCheckin.toLowerCase() : 'None yet today';
   let html = '<section class="card" aria-label="Check-in"><div class="check-row">' +
     '<button type="button" class="check-toggle" data-act="toggle" aria-expanded="' + S.open + '" aria-controls="check-body">' +
     '<span aria-hidden="true"></span><span><h2>Check-in</h2><span class="sub">' + (S.open ? '' : esc(last)) + '</span></span>' +
     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button></div>';
   if (S.open) {
-    const stage = S.stage || guessStage();
-    const list = (sleepAsked(period, stage) ? SLEEP.map(([k, l, m]) => [k, l, m]) : []).concat(SCALES.map(([k, l]) => [k, l, 10]))
-      .concat(period === 'Bed' || (period === 'Day' && new Date().getHours() >= 18) ? [['stress', 'Stress today (0–5)', 5]] : []);  // whole-day stress (Stress column); v74: also on day check-ins from 18:00
+    const inBed = ciInBed();
     html += '<div id="check-body" style="display:flex;flex-direction:column;gap:14px">' +
-      '<div class="grid3" role="group" aria-label="When">' + ['Wake', 'Day', 'Bed'].map((p) =>
-        '<button type="button" class="seg" data-act="period" data-v="' + p + '" aria-pressed="' + (period === p) + '">' + p + '</button>').join('') + '</div>' +
-      (period === 'Wake' ? '<div class="grid2 stage-row" role="group" aria-label="Wake stage">' + [['bed', 'In bed'], ['up', 'Getting up']].map(([k, l]) =>
-        '<button type="button" class="seg" data-act="stage" data-v="' + k + '" aria-pressed="' + (stage === k) + '">' + l + '</button>').join('') + '</div>' : '') + '<div>' +
-      list.map(([k, l, max]) => {
-        const v = S.scores[k];
-        const set = v !== undefined;
-        // v39: sleep times sit straight under the sleep sliders (or first, when there are none).
-        const times = period === 'Wake' && (k === 'disturb' || (k === list[0][0] && !list.some((x) => x[0] === 'disturb'))) ? sleepTimesHtml() : '';
-        const slider = '<div class="scale"><label for="r-' + k + '">' + l + '</label>' +
-          '<input id="r-' + k + '" type="range" min="0" max="' + max + '" step="0.5" value="' + (set ? v : max / 2) + '" data-score="' + k + '"' + (set ? '' : ' class="unset"') + '>' +
+      '<div class="grid2" role="group" aria-label="Where are you">' + [[true, 'In bed'], [false, 'Up']].map(([b, l]) =>
+        '<button type="button" class="seg" data-act="inbed" data-v="' + b + '" aria-pressed="' + (inBed === b) + '">' + l + '</button>').join('') + '</div><div>' +
+      SCALES.map(([k, l]) => {
+        const v = S.scores[k], set = v !== undefined;
+        return '<div class="scale"><label for="r-' + k + '">' + l + '</label>' +
+          '<input id="r-' + k + '" type="range" min="0" max="10" step="0.5" value="' + (set ? v : 5) + '" data-score="' + k + '"' + (set ? '' : ' class="unset"') + '>' +
           '<output id="o-' + k + '" for="r-' + k + '"' + (set ? '' : ' class="unset"') + '>' + (set ? v : '–') + '</output></div>';
-        return k === 'disturb' ? slider + times : times + slider;
       }).join('') + '</div>' +
       watchView() + momentsView() +
       '<input type="text" data-field="checkNote" value="' + esc(S.checkNote) + '" placeholder="Note (optional)" aria-label="Check-in note" autocomplete="off">' +
@@ -787,15 +819,6 @@ function checkinView() {
   return html + '</section>';
 }
 
-function sleepTimesHtml() {
-  // v56: the Oura ring gives went-to-sleep and woke; they fold away under "Ring off?", got-up stays.
-  const keys = S.ringOff ? [['bed', 'Went to sleep'], ['wake', 'Woke'], ['up', 'Got up']] : [['up', 'Got up']];
-  return '<div class="sleep-times' + (S.ringOff ? '' : ' one') + '" role="group" aria-label="Sleep times">' + keys.map(([k, l]) =>
-    '<label><span>' + l + '</span><input type="time" data-sleep="' + k + '" value="' + esc(S.sleepT[k]) + '"></label>').join('') +
-    '<button type="button" class="link-btn ring-off" data-act="ring-off">' + (S.ringOff ? 'Hide sleep times' : 'Ring off? Add sleep times') + '</button></div>' +
-    // v54/v62: on waking, yes/no buttons (bad taste, tinnitus, sore throat), saved in the check-in's note ("Morning: bad taste on waking: yes").
-    '<div class="wake-flags" role="group" aria-label="On waking">' + WAKE_FLAGS.map(([k, l]) => '<button type="button" class="moment-btn" data-act="wake-flag" data-v="' + k + '" aria-pressed="' + !!S.wakeFlags[k] + '">' + l + '</button>').join('') + '</div>';
-}
 /* v85 (backlog job 19, first part): a short watch list for the trial period, asked in the check-in instead of
    remembered. Saved in the check-in's note as "Watch: heel pain on first steps: no; allodynia: yes", so a chat or
    the audit can count them later.
@@ -1217,7 +1240,7 @@ function quickView() {
 }
 function sheetView() {
   if (!S.sheet || !Conn.canLog()) return '';
-  const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity', moment: 'Moment', plan: 'Medication plan', edit: 'Edit entry', sleep: S.sleepEdit && S.sleepEdit.mark === 'up' ? 'Out of bed' : 'Into bed' }[S.sheet];
+  const title = { meds: 'Medication', bowel: 'Bowel', food: 'Food', activity: 'Activity', moment: 'Moment', plan: 'Medication plan', edit: 'Edit entry', sleep: S.sleepEdit && S.sleepEdit.mark === 'up' ? 'Out of bed' : 'Into bed', sleeprate: 'Last night’s sleep', stress: 'Stress today' }[S.sheet];
   let body = '', btn = '';
   if (S.sheet === 'meds') {
     const sup = suppList();
@@ -1249,10 +1272,17 @@ function sheetView() {
     const place = S.sleepPlace || 'Home';
     const places = E.mark !== 'up' && !E.row ? '<div class="chips sleep-place" role="group" aria-label="Where">' +
       ['Home', "Mara's", 'Other'].map((p) => '<button type="button" class="chip' + (place === p ? ' on' : '') + '" aria-pressed="' + (place === p) + '" data-act="sleep-place" data-v="' + esc(p) + '">' + esc(p) + '</button>').join('') + '</div>' +
-      (place === 'Other' ? '<input type="text" class="edit-text" data-field="sleepPlaceOther" maxlength="30" placeholder="Where?" value="' + esc(S.sleepPlaceOther || '') + '">' : '') : '';
+      (place === 'Other' ? '<input type="text" class="edit-text" data-field="sleepPlaceOther" maxlength="30" placeholder="Where?" value="' + esc(S.sleepPlaceOther || '') + '">' : '') +
+      '<div class="chips sleep-place" role="group" aria-label="Sharing the bed"><button type="button" class="chip' + (S.sleepMara ? ' on' : '') + '" aria-pressed="' + !!S.sleepMara + '" data-act="sleep-mara">With Mara</button></div>' : '';
     btn = '<button type="button" class="log" data-act="sleep-save"' + (E.busy ? ' disabled' : '') + '>' + (E.row ? 'Save' : 'Log') + '</button>';
     body = '<label class="edit-row"><span>' + (E.mark === 'up' ? 'Got out of bed at' : E.mark === 'lastbed' ? 'Got into bed last night at' : 'Got into bed at') + '</span><input type="time" data-field="sleepTime" value="' + esc(S.sleepTime || '') + '"></label>' + places +
       '<p class="small">' + (E.row ? 'Changes the time already logged.' : E.mark === 'lastbed' ? 'Afternoon/evening times count as yesterday.' : E.mark === 'bed' ? 'Times after midnight count as tonight.' : '') + (E.error ? ' <b>' + esc(E.error) + '</b>' : '') + '</p>';
+  } else if (S.sheet === 'sleeprate') {
+    btn = '<button type="button" class="log" id="rate-save" data-act="sleeprate-save"' + (rateCount() ? '' : ' disabled') + '>Log</button>';
+    body = sleepRateBody();
+  } else if (S.sheet === 'stress') {
+    btn = '<button type="button" class="log" id="rate-save" data-act="stress-save"' + (S.rate.stress === undefined ? ' disabled' : '') + '>Log</button>';
+    body = rateSlider('stress', 'How stressful was today? (0–5)', 5) + '<p class="small">One for the whole day, any time from the evening. Counts for today until 4am.</p>';
   } else if (S.sheet === 'edit') {
     // v64: change the time (and the words of a meal, activity or note), or delete. Needs HealthLog v64.
     const E = S.edit || {};
@@ -1288,7 +1318,7 @@ function sheetView() {
   const now = new Date();
   const label = S.time ? (dayKey(S.time) === dayKey(now) ? '' : S.time.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + hm(S.time) : 'Now · ' + hm(now);
   if (S.sheet === 'food' || S.sheet === 'activity' || S.sheet === 'bowel') body += todayListHtml(S.sheet);
-  const when = S.sheet === 'plan' || S.sheet === 'edit' || S.sheet === 'sleep' ? '' : '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
+  const when = S.sheet === 'plan' || S.sheet === 'edit' || S.sheet === 'sleep' || S.sheet === 'sleeprate' || S.sheet === 'stress' ? '' : '<div class="sheet-time">' + timePill(label) + '</div>' + (S.timeOpen ? timePanel(now) : '');
   return '<div class="sheet-backdrop' + (S.sheetFresh ? ' fresh' : '') + '" data-act="sheet-close"></div>' +
     '<div class="sheet' + (S.sheetFresh ? ' fresh' : '') + '" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">' +
     '<div class="sheet-grab" aria-hidden="true"></div><div class="sheet-head"><h2 id="sheet-title">' + title + '</h2>' + btn +
@@ -1447,7 +1477,7 @@ function localInputValue(d) { return dayKey(d) + 'T' + hm(d); }
 function updateCheckButton() {
   const b = $('check-save');
   if (!b) return;
-  const n = Object.keys(S.scores).length + ((S.period || guessPeriod()) === 'Wake' ? Object.values(S.sleepT).filter(Boolean).length + WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).length : 0) + (S.moment.length ? 1 : 0) + watchPicked().length;
+  const n = Object.keys(S.scores).length + (S.moment.length ? 1 : 0) + watchPicked().length;
   b.disabled = !n;
   b.textContent = n ? 'Save check-in · ' + n + (n === 1 ? ' entry' : ' entries') : 'Save check-in';
 }
@@ -1627,12 +1657,11 @@ function logAct(el) {
     return;
   }
   if (act === 'toggle') {
-    S.open = !S.open; if (S.open && !S.period) S.period = guessPeriod(); logRender();
+    S.open = !S.open; if (S.open && typeof S.inBed !== 'boolean') S.inBed = guessInBed(); logRender();
     // Bring the check-in to the top of the screen so the sliders are in view.
     if (S.open) requestAnimationFrame(() => { const c = document.querySelector('#log-main section[aria-label="Check-in"]'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   }
-  else if (act === 'period') { S.period = v; if (v !== 'Bed') delete S.scores.stress; if (!sleepAsked(v, S.stage || guessStage())) { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
-  else if (act === 'stage') { S.stage = v; if (!sleepAsked(S.period || guessPeriod(), v)) { delete S.scores.sleepq; delete S.scores.disturb; } logRender(); }
+  else if (act === 'inbed') { S.inBed = v === 'true'; logRender(); }
   else if (act === 'bristol') { S.bristol = S.bristol === Number(v) ? null : Number(v); logRender(); }
   else if (act === 'size') { S.size = S.size === v ? null : v; logRender(); }
   else if (act === 'urgent') { S.urgent = !S.urgent; logRender(); }
@@ -1686,9 +1715,13 @@ function logAct(el) {
     S.sleepTime = mk ? mk.hm : pad(now.getHours()) + ':' + pad(now.getMinutes());
     S.sleepPlace = LS.get('sleepPlace', 'Home'); S.sleepPlaceOther = LS.get('sleepPlaceOther', '');
     if (S.sleepPlace !== 'Home' && Date.now() - LS.get('sleepPlaceAt', 0) > 20 * 3600000) S.sleepPlace = 'Home';  // somewhere else is remembered for one night only
+    S.sleepMara = Date.now() - LS.get('sleepPlaceAt', 0) > 20 * 3600000 ? false : !!LS.get('sleepMara', false);  // v92: so is "with Mara"
     openSheet('sleep');
   }
-  else if (act === 'sleep-place') { S.sleepPlace = v; logRender(); }
+  else if (act === 'sleep-place') { S.sleepPlace = v; if (v === "Mara's") S.sleepMara = true; logRender(); }
+  else if (act === 'sleep-mara') { S.sleepMara = !S.sleepMara; logRender(); }
+  else if (act === 'sleeprate-open') { S.rate = {}; S.wakeFlags = {}; S.sleepT = { bed: '', wake: '', up: '' }; S.ringOff = false; openSheet('sleeprate'); }
+  else if (act === 'stress-open') { S.rate = {}; openSheet('stress'); }
   else if (act === 'sleep-save') {
     const E = S.sleepEdit;
     if (!E || !/^\d{2}:\d{2}$/.test(S.sleepTime || '')) return;
@@ -1705,11 +1738,14 @@ function logAct(el) {
     let place = '';
     if (E.mark !== 'up') {
       place = S.sleepPlace === 'Other' ? (S.sleepPlaceOther || '').trim().slice(0, 30) : S.sleepPlace === "Mara's" ? "Mara's" : 'home';
-      LS.set('sleepPlace', S.sleepPlace || 'Home'); LS.set('sleepPlaceAt', Date.now());
+      LS.set('sleepPlace', S.sleepPlace || 'Home'); LS.set('sleepPlaceAt', Date.now()); LS.set('sleepMara', !!S.sleepMara);
       if (S.sleepPlace === 'Other') LS.set('sleepPlaceOther', place);
+      // v92 (job 22): "with Mara" rides on the place ("home with Mara"), so any receiver keeps it; HealthLog v92
+      // writes it as "Into bed at 00:31 at home, with Mara (sleep time only)".
+      if (S.sleepMara) place = (place || 'home').slice(0, 19) + ' with Mara';
     }
     S.time = d;
-    const label = (E.mark === 'up' ? 'Out of bed ' : E.mark === 'lastbed' ? 'Into bed (last night) ' : 'Into bed ') + S.sleepTime + (place && place !== 'home' ? ' · ' + place : '');
+    const label = (E.mark === 'up' ? 'Out of bed ' : E.mark === 'lastbed' ? 'Into bed (last night) ' : 'Into bed ') + S.sleepTime + (place && place !== 'home' ? ' · ' + place.replace(' with Mara', ', with Mara') : '');
     commit('sleepmark', place ? { mark: E.mark === 'up' ? 'up' : 'bed', place } : { mark: E.mark === 'up' ? 'up' : 'bed' }, label,
       { sleepSlot: E.mark, sleepK: healthKey(new Date()), place, up: E.mark === 'up' });
     S.sleepEdit = null; closeSheet();
@@ -1766,30 +1802,46 @@ function logAct(el) {
   }
   else if (act === 'bc-amt') { S.bcAmt = S.bcAmt === v ? null : v; logRender(); if (S.bcAmt === 'g') { const g = document.querySelector('#sheet .bc-grams'); if (g) g.focus(); } }
   else if (act === 'checkin') {
-    const period = S.period || guessPeriod();
-    const stage = period === 'Wake' ? (S.stage || guessStage()) : '';
-    const times = period === 'Wake' ? Object.fromEntries(Object.entries(S.sleepT).filter(([, v]) => /^\d{2}:\d{2}$/.test(v))) : {};
-    const n = Object.keys(S.scores).length, t = Object.keys(times).length;
+    const period = ciPeriod(), inBed = period !== 'Day';
+    const stage = period === 'Wake' ? 'bed' : '';
+    const n = Object.keys(S.scores).length;
     const mos = S.moment.filter((m) => MOMENTS.includes(m));
-    const fl = (period === 'Wake' ? WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).length : 0) + watchPicked().length;  // v62: a flag alone still saves (v85: a watch answer too)
-    if (!n && !t && !mos.length && !fl) return;
+    const fl = watchPicked().length;  // v85: a watch answer alone still saves
+    if (!n && !mos.length && !fl) return;
     const note = S.checkNote.trim(), at = S.time;
     // Each moment is its own entry (kept out of day scores); the note goes with each.
     mos.forEach((mo) => { S.time = at; commit('moment', { moment: mo, note }, mo + (note ? ' · ' + note : '')); S.time = at; });
-    if (!n && !t && !fl) { S.moment = []; S.checkNote = ''; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender(); return; }
-    const tl = [times.bed ? 'slept ' + times.bed : '', times.wake ? 'woke ' + times.wake : '', times.up ? 'up ' + times.up : ''].filter(Boolean).join(', ');
-    const word = stage === 'up' ? 'getting up' : stage === 'bed' ? 'in bed' : period.toLowerCase();
+    if (!n && !fl) { S.moment = []; S.checkNote = ''; S.open = false; S.inBed = null; logRender(); return; }
     // Receivers before HealthLog v13 only know "fog" (10 = heavy fog), so send that too until it's updated.
     const sc = Object.assign({}, S.scores);
     if (typeof sc.clarity === 'number') sc.fog = 10 - sc.clarity;
-    const flags = period === 'Wake' ? WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).map(([, , t]) => t) : [];
     const watched = watchPicked().map((w) => w.text(S.watch[w.key]));
-    const ciNote = [flags.length ? 'Morning: ' + flags.join('; ') : '', watched.length ? 'Watch: ' + watched.join('; ') : '', S.checkNote.trim()].filter(Boolean).join('. ');
+    const ciNote = [watched.length ? 'Watch: ' + watched.join('; ') : '', S.checkNote.trim()].filter(Boolean).join('. ');
     watchPicked().forEach((w) => { if (w.once) LS.set('watch.' + w.key, healthKey(new Date())); });
-    S.wakeFlags = {}; S.watch = {};
-    commit('checkin', { period, stage, scores: sc, note: ciNote, sleep: times },
-      'Check-in (' + word + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (tl ? ' · ' + tl : '') + (flags.length ? ' · ' + flags.map((f) => f.replace(' on waking: yes', '')).join(', ') : '') + (watched.length ? ' · ' + watched.join(', ') : ''), { wake: period === 'Wake' && stage === 'bed', up: period === 'Wake' && stage === 'up', period });
-    S.scores = {}; S.checkNote = ''; S.moment = []; S.open = false; S.period = null; S.stage = null; S.sleepT = { bed: '', wake: '', up: '' }; logRender();
+    S.watch = {};
+    commit('checkin', { period, stage, scores: sc, note: ciNote, sleep: {} },
+      'Check-in (' + (inBed ? 'in bed' : 'up') + ')' + (n ? ' · ' + n + (n === 1 ? ' rating' : ' ratings') : '') + (watched.length ? ' · ' + watched.join(', ') : ''), { wake: period === 'Wake', period });
+    S.scores = {}; S.checkNote = ''; S.moment = []; S.open = false; S.inBed = null; logRender();
+  }
+  else if (act === 'sleeprate-save') {
+    const n = rateCount();
+    if (!n) return;
+    const times = Object.fromEntries(Object.entries(S.sleepT).filter(([k, v]) => k !== 'up' && /^\d{2}:\d{2}$/.test(v)));
+    const sc = {}; ['sleepq', 'disturb'].forEach((k) => { if (S.rate[k] !== undefined) sc[k] = S.rate[k]; });
+    const flags = WAKE_FLAGS.filter(([k]) => S.wakeFlags[k]).map(([, , t]) => t);
+    const bits = [sc.sleepq !== undefined ? 'quality ' + sc.sleepq : '', sc.disturb !== undefined ? 'disturbed ' + sc.disturb : '',
+      times.bed ? 'slept ' + times.bed : '', times.wake ? 'woke ' + times.wake : '', flags.map((f) => f.replace(' on waking: yes', '')).join(', ')].filter(Boolean);
+    S.time = null;
+    commit('checkin', { period: 'Wake', stage: 'bed', only: 'sleep', scores: sc, note: flags.length ? 'Morning: ' + flags.join('; ') : '', sleep: times },
+      'Last night’s sleep · ' + bits.join(' · '), { sleepRate: true });
+    S.rate = {}; S.wakeFlags = {}; S.sleepT = { bed: '', wake: '', up: '' }; S.ringOff = false; closeSheet();
+  }
+  else if (act === 'stress-save') {
+    if (S.rate.stress === undefined) return;
+    const st = S.rate.stress;
+    S.time = null;
+    commit('checkin', { period: 'Day', stage: '', only: 'stress', scores: { stress: st }, note: '', sleep: {} }, 'Stress today · ' + st + '/5', { stressLog: true });
+    S.rate = {}; closeSheet();
   }
   else if (act === 'trial') {
     const t = cfg.trial;
@@ -1845,9 +1897,15 @@ document.addEventListener('input', (ev) => {
     el.classList.remove('unset');
     const o = $('o-' + k); o.textContent = el.value; o.classList.remove('unset');
     updateCheckButton();
+  } else if (el.dataset.rate) {
+    const k = el.dataset.rate;
+    S.rate[k] = Number(el.value);
+    el.classList.remove('unset');
+    const o = $('or-' + k); if (o) { o.textContent = el.value; o.classList.remove('unset'); }
+    updateRateButton();
   } else if (el.dataset.sleep) {
     S.sleepT[el.dataset.sleep] = el.value;
-    updateCheckButton();
+    updateRateButton();
   } else if (el.id === 'act-min-custom') {
     // v39: any number of minutes (1–600) instead of the chips.
     S.actMinText = el.value;
