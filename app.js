@@ -7,7 +7,7 @@ if (!Element.prototype.replaceChildren) Element.prototype.replaceChildren = func
 if (!DocumentFragment.prototype.replaceChildren) DocumentFragment.prototype.replaceChildren = Element.prototype.replaceChildren;
 if (!Object.fromEntries) Object.fromEntries = (it) => { const o = {}; for (const [k, v] of it) o[k] = v; return o; };
 if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return this.split(a).join(b); };
-const APP_VERSION = 'v94 · 20 Nov';
+const APP_VERSION = 'v95 · 24 Nov';
 const ROOT = document.documentElement;
 /* v40 share mode: a link ending #share=<receiver id> opens a view-only Health page for one person, who
    unlocks it with their own password (Sharing tab in the health tracker). Nothing can be logged from it. */
@@ -173,7 +173,9 @@ function toast(text, undoId) {
   const b = $('toast-btn');
   b.hidden = !undoId;
   b.dataset.v = undoId || '';
-  $('toast').hidden = false;
+  const notice = $('toast');
+  notice.toggleAttribute('data-undo', Boolean(undoId));
+  notice.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { $('toast').hidden = true; }, undoId ? UNDO_MS : 3000);
 }
@@ -3652,7 +3654,7 @@ function activityAround(T2) {
     '<tr><td>' + esc(r.name.replace('Mental clarity', 'Clarity')) + '</td>' + r.cells.map((c) => {
       if (!c) return '<td class="same">–</td>';
       const tone = Math.abs(c.m) < 0.3 ? 'same' : c.m > 0 ? 'worse' : 'better';
-      return '<td class="' + tone + (c.pattern ? ' top' : '') + '">' + (tone === 'same' ? '≈' : (c.m > 0 ? '▼ ' : '▲ ') + Math.abs(c.m).toFixed(1)) + '<small>' + c.same + ' of ' + c.n + '</small></td>';
+      return '<td class="' + tone + (c.pattern ? ' pt-emphasis' : '') + '"><span class="pt-value">' + (tone === 'same' ? '≈' : (c.m > 0 ? '▼ ' : '▲ ') + Math.abs(c.m).toFixed(1)) + '</span><small>' + c.same + ' of ' + c.n + '</small></td>';
     }).join('') + '</tr>').join('') + '</tbody></table>';
   p.html = h;
   p.note = '▲ = better than your usual, ▼ = worse (pain, stiffness, fatigue or headache higher; clarity or mood lower), ≈ = within 0.3. "5 of 6" = how many occasions went that way. Usual = the middle value of the 14 days before each occasion. Uses up-and-about readings only, each part of the day counted once. Late nights, missed medication and other things change too, so this shows patterns, not causes.';
@@ -3695,9 +3697,9 @@ function activityPatterns(T2) {
   const top = rows.filter((r) => Math.abs(r.d) >= 0.5).slice(0, 2);
   const word = (r) => (r.d > 0 ? 'worse' : 'better');
   h += '<p class="pt-lead">' + (top.length ? 'Biggest difference ' + lagWord + ': <b>' + top.map((r) => esc(r.name.toLowerCase()) + ' ' + Math.abs(r.d).toFixed(1) + ' ' + word(r)).join('</b> and <b>') + '</b> after more active days.' : 'No symptom differs by half a point or more ' + lagWord + ' between more and less active days so far.') + '</p>';
-  h += '<table class="pt-table"><thead><tr><th>' + esc(lagWord.charAt(0).toUpperCase() + lagWord.slice(1)) + '</th><th>Less active days</th><th>More active days</th><th></th></tr></thead><tbody>' + rows.map((r) => {
+  h += '<table class="pt-table pt-activity"><thead><tr><th>' + esc(lagWord.charAt(0).toUpperCase() + lagWord.slice(1)) + '</th><th>Less active days</th><th>More active days</th><th></th></tr></thead><tbody>' + rows.map((r) => {
     const tone = Math.abs(r.d) < 0.5 ? 'same' : r.d > 0 ? 'worse' : 'better';
-    return '<tr class="' + tone + (top.includes(r) ? ' top' : '') + '"><td>' + esc(r.name) + '</td><td>' + r.q + '</td><td>' + r.b + '</td><td>' + (tone === 'same' ? '≈' : (r.d > 0 ? '▼ ' : '▲ ') + Math.abs(r.d).toFixed(1) + (tone === 'worse' ? ' worse' : ' better')) + '</td></tr>';
+    return '<tr class="' + tone + (top.includes(r) ? ' pt-emphasis' : '') + '"><td>' + esc(r.name) + '</td><td>' + r.q + '</td><td>' + r.b + '</td><td><span class="pt-value">' + (tone === 'same' ? '≈' : (r.d > 0 ? '▼ ' : '▲ ') + Math.abs(r.d).toFixed(1)) + '</span>' + (tone === 'same' ? '' : ' ' + tone) + '</td></tr>';
   }).join('') + '</tbody></table>';
   p.html = h;
   p.note = 'More active = days above your middle (median) ' + (useSteps ? 'step count (Oura)' : 'number of active minutes logged') + '; less active = the rest. Differences under half a point count as the same. Stress is shown out of 5. Other things change too (sleep, stress, food), so this shows patterns, not causes.';
@@ -4205,6 +4207,13 @@ function medEffect(T2, name) {
     const arrow = better === null ? (r.o.unit === 'min' ? '' : v > 0 ? '+' : '−') : better ? '▲ ' : '▼ ';
     return arrow + (r.o.unit === 'min' ? Math.round(a) + ' min' + (better === null ? (v > 0 ? ' later' : ' earlier') : '') : r.o.unit === 'h' ? a.toFixed(1) + ' h' : a.toFixed(1));
   };
+  const comparisonValue = (r, v) => {
+    const value = fmt(r, v);
+    if (r.o.unit === 'min') {
+      return esc(value).replace(/^(\d+) min/, '<span class="pt-value">$1 min</span>');
+    }
+    return '<span class="pt-value">' + esc(value) + '</span>';
+  };
   const tone = (r, v) => { if (v === null || r.o.worse === 0) return 'same'; const a = Math.abs(v); if (a < (r.o.unit === 'h' ? 0.2 : 0.3)) return 'same'; return v * r.o.worse < 0 ? 'better' : 'worse'; };
   const pats = [];
   rows.forEach((r) => {
@@ -4215,7 +4224,7 @@ function medEffect(T2, name) {
   if (rows.length) {
     h += '<p class="pt-lead">' + (pats.length ? 'On days with ' + esc(name) + ': <b>' + esc(pats.join('; ')) + '</b>.' : off.length < 3 ? '' : 'Nothing clear yet: no measure differs by enough on enough days.') + '</p>';
     h += '<table class="pt-table pt-around pt-med"><thead><tr><th></th><th>' + (night ? 'Next day / night' : 'Days taken') + ' vs without</th><th>Same getting-up time</th></tr></thead><tbody>' + rows.map((r) =>
-      '<tr><td>' + esc(r.o.name) + '</td><td class="' + tone(r, r.diff) + (r.solid ? ' top' : '') + '">' + fmt(r, r.diff) + '<small>' + r.nA + ' vs ' + r.nB + ' days</small></td><td class="' + tone(r, r.m) + '">' + fmt(r, r.m) + '</td></tr>').join('') + '</tbody></table>';
+      '<tr><td>' + esc(r.o.name) + '</td><td class="' + tone(r, r.diff) + (r.solid ? ' pt-emphasis' : '') + '">' + comparisonValue(r, r.diff) + '<small>' + r.nA + ' vs ' + r.nB + ' days</small></td><td class="' + tone(r, r.m) + '">' + comparisonValue(r, r.m) + '</td></tr>').join('') + '</tbody></table>';
   }
   // What else was different on those days.
   const also = [];

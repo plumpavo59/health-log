@@ -28,7 +28,10 @@ a{color:inherit}
 #tabbar button svg{width:22px;height:22px}
 #tabbar button[aria-current=page]{color:var(--ink);font-weight:650}
 #toast{border:1px solid var(--toast-line,transparent);position:fixed;left:16px;right:16px;bottom:calc(66px + env(safe-area-inset-bottom));max-width:488px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:12px 14px 12px 16px;border-radius:14px;background:var(--toast-bg,var(--ink));color:var(--toast-ink,var(--on-ink));font-size:15px;z-index:30}
-#toast span{flex:1}
+#toast{pointer-events:none;background:color-mix(in srgb,var(--toast-bg,var(--ink)) 76%,transparent)}
+#toast:not([data-undo]){top:calc(8px + env(safe-area-inset-top));bottom:auto;right:auto;left:50%;transform:translateX(-50%);width:max-content;max-width:min(440px,calc(100% - 32px));padding:7px 12px;font-size:13px}
+#toast span{flex:1;min-width:0;overflow-wrap:anywhere}
+#toast button{pointer-events:auto}
 #toast button{min-height:40px;padding:0 12px;border:1px solid currentColor;border-radius:20px;background:transparent;color:inherit;font-size:14px;font-weight:600}
 
 /* ---------- shared form bits (settings, pairing, log) ---------- */
@@ -678,7 +681,10 @@ html.share-mode .eyebrow{visibility:hidden}
 .pt-table td{padding:7px 4px;border-bottom:1px solid var(--line3);text-align:right;white-space:nowrap}
 .pt-table td:first-child{white-space:normal}
 .pt-table tr.worse td:last-child{color:#c8463f}.pt-table tr.better td:last-child{color:#2f8a4c}.pt-table tr.same td:last-child{color:var(--muted2)}
-.pt-table tr.top td{font-weight:650}
+.pt-table tr.pt-emphasis td{font-weight:650}
+.pt-table td{font-variant-numeric:tabular-nums}
+.pt-value{white-space:nowrap}
+.pt-activity th,.pt-activity td:last-child{white-space:normal}
 .tr-week{stroke:var(--line3);stroke-width:1}
 .tr-band{font-size:8.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;fill:var(--muted2)}
 .tr-actbar.light{fill:#9cc0ec}.tr-actbar.mod{fill:#4a7fd6}.tr-actbar.hard{fill:#1f4e9c}
@@ -722,7 +728,7 @@ html.share-mode .eyebrow{visibility:hidden}
 .tr-trial-h{font-size:15.5px;font-weight:650;margin:16px 0 4px;display:flex;align-items:center;gap:8px}
 .tr-now{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;background:var(--ink);color:var(--bg);border-radius:999px;padding:2px 8px}
 .tr-part.h0{fill:var(--h0)}.tr-part.hb{fill:var(--hb)}.tr-part.h1{fill:var(--h1)}.tr-part.h2{fill:var(--h2)}.tr-part.h3{fill:var(--h3)}.tr-part.h4{fill:var(--h4)}.tr-kc .h2{background:var(--h2)}
-.pt-around td.worse{color:#c8463f}.pt-around td.better{color:#2f8a4c}.pt-around td.same{color:var(--muted2)}.pt-around td.top{font-weight:700}
+.pt-around td.worse{color:#c8463f}.pt-around td.better{color:#2f8a4c}.pt-around td.same{color:var(--muted2)}.pt-around td.pt-emphasis{font-weight:700}
 .pt-around td small{display:block;font-size:10.5px;color:var(--muted2);font-weight:400}.pt-around th{font-size:10.5px;padding:6px 2px}
 .pt-around{table-layout:fixed}.pt-around td,.pt-around th{white-space:normal;width:19%}.pt-around td:first-child,.pt-around th:first-child{width:24%}
 .lr-edit{margin-left:6px;font-size:13px}.edit-what{margin:2px 0 10px;font-weight:600}
@@ -730,7 +736,8 @@ html.share-mode .eyebrow{visibility:hidden}
 .seg.edit-del{width:100%;margin-top:6px;color:#c8463f}.seg.edit-del.on{background:#c8463f;color:#fff;border-color:#c8463f}
 .edit-row input[type=time]{height:44px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font:inherit;color:inherit;background:transparent}
 .tr-act-line{fill:none;stroke:#2a9d8f;stroke-width:1.8;stroke-linejoin:round;opacity:.9}.tr-actdot{fill:#2a9d8f}
-.pt-list{margin:4px 0 8px;padding-left:18px;font-size:13.5px;line-height:1.45}.pt-list li{margin:2px 0}.pt-med td:first-child{width:38%}.pt-med td,.pt-med th{width:31%}
+.pt-list{margin:4px 0 8px;padding-left:18px;font-size:13.5px;line-height:1.45}.pt-list li{margin:2px 0}.pt-med td:first-child,.pt-med th:first-child{width:38%}.pt-med td,.pt-med th{width:31%}
+.pt-med td small{white-space:nowrap}
 .sleep-card{padding:10px 12px}.sleep-mark{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 6px;font-weight:600}
 .sleep-mark small{font-weight:400;font-size:12px;color:var(--muted2)}.sleep-mark.done small{color:inherit;opacity:.8}
 /* v74 sleep card: last night / today */
